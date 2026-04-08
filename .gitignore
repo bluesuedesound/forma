@@ -1,0 +1,11 @@
+build/
+*.vst3
+*.component
+*.app
+.DS_Store
+*.o
+*.a
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
