@@ -1,0 +1,40 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//Applications/**)",
+      "Read(//Users/alexupton/**)",
+      "Read(//usr/local/**)",
+      "Bash(mdfind -name Projucer)",
+      "Bash(xcodebuild:*)",
+      "Bash(xcode-select -p)",
+      "Bash(xcrun --show-sdk-path)",
+      "Bash(ls /Applications/Xcode*.app)",
+      "Bash(/Users/alexupton/Downloads/JUCE/Projucer.app/Contents/MacOS/Projucer --help)",
+      "Bash(cmake --version)",
+      "Bash(cmake:*)",
+      "Bash(codesign:*)",
+      "Bash(otool -l /Users/alexupton/Desktop/forma-vst/build/Forma_artefacts/Release/VST3/Forma.vst3/Contents/MacOS/Forma)",
+      "Bash(sysctl hw.optional.arm64)",
+      "Bash(otool:*)",
+      "Bash(log show:*)",
+      "Bash(ls ~/Library/Logs/DiagnosticReports/*orma*)",
+      "Bash(ls ~/Library/Logs/DiagnosticReports/*Live*)",
+      "Bash(auval -a)",
+      "Bash(auval -v aumi Frm1 Frma)",
+      "Bash(xargs ls:*)",
+      "Bash(grep:*)",
+      "Bash(python3 /tmp/test_midi_ports.py)",
+      "WebSearch",
+      "Bash(python3:*)",
+      "Bash(pip3 install:*)",
+      "Bash(kill 40859)",
+      "Bash(mkdir -p ~/Desktop/Forma-Beta-1.0)",
+      "Bash(cp -R ~/Library/Audio/Plug-Ins/VST3/Forma.vst3 ~/Desktop/Forma-Beta-1.0/Forma.vst3)",
+      "Read(//mnt/user-data/outputs/**)",
+      "Bash(cp /mnt/user-data/outputs/Forma_Documentation.pdf ~/Desktop/Forma-Beta-1.0/)",
+      "Bash(zip -r Forma-Beta-1.0.zip Forma-Beta-1.0/)",
+      "Bash(unzip -l ~/Desktop/Forma-Beta-1.0.zip)",
+      "Bash(sed:*)"
+    ]
+  }
+}
