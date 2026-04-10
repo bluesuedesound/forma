@@ -1,0 +1,235 @@
+{
+  "zone": "deep_zone2",
+  "mood": "Deep",
+  "zone_number": 2,
+  "name": "Soulful",
+  "description": "Minor 7ths \u2014 Marvin Gaye, Bill Withers, classic soul",
+  "mode": "dorian",
+  "extension_range": [
+    1,
+    1
+  ],
+  "key_chords": [
+    "im7",
+    "IVmaj7",
+    "IIm7"
+  ],
+  "transitions": {
+    "V<sup>7</sup>/IV": {
+      "IV<sup>7</sup>": 0.7956,
+      "ii<sup>7</sup>": 0.0438,
+      "V<sup>7</sup>": 0.0401,
+      "IVb7": 0.0365,
+      "iv<sup>7</sup>": 0.0256,
+      "V<sup>7</sup>/ii": 0.0219,
+      "V<sup>7</sup>/iii": 0.0182,
+      "vi<sup>7</sup>": 0.0182
+    },
+    "V<sup>7</sup>": {
+      "I<sup>7</sup>": 0.2828,
+      "vi<sup>7</sup>": 0.197,
+      "ii<sup>7</sup>": 0.1769,
+      "iii<sup>7</sup>": 0.0908,
+      "IV<sup>7</sup>": 0.0555,
+      "V<sup>7</sup>/IV": 0.0505,
+      "Ib7": 0.0404,
+      "V<sup>7</sup>/vi": 0.0354,
+      "v<sup>??</sup><sup>7</sup>": 0.0252,
+      "IVb7": 0.0252,
+      "v<sup>7</sup>": 0.0203
+    },
+    "half_dim7": {
+      "dom7alt": 0.4559,
+      "dom7": 0.3529,
+      "dom13": 0.0883,
+      "min": 0.0441,
+      "dom9": 0.0294,
+      "maj13": 0.0294
+    },
+    "V<sup>7</sup>/vi": {
+      "vi<sup>7</sup>": 0.6594,
+      "IV<sup>7</sup>": 0.0897,
+      "V<sup>7</sup>/ii": 0.0762,
+      "IVb7": 0.0717,
+      "ii<sup>7</sup>": 0.0537,
+      "iii<sup>7</sup>": 0.0313,
+      "v<sup>7</sup>": 0.018
+    },
+    "min7": {
+      "dom7": 0.6857,
+      "min7": 0.166,
+      "dom7alt": 0.0814,
+      "dim7": 0.0352,
+      "half_dim7": 0.0318
+    },
+    "ii<sup>7</sup>": {
+      "V<sup>7</sup>": 0.3139,
+      "iii<sup>7</sup>": 0.2834,
+      "vi<sup>7</sup>": 0.1833,
+      "IV<sup>7</sup>": 0.1167,
+      "V<sup>7</sup>/vi": 0.0584,
+      "I<sup>7</sup>": 0.0444
+    },
+    "vi<sup>7</sup>": {
+      "ii<sup>7</sup>": 0.3506,
+      "iii<sup>7</sup>": 0.2089,
+      "IV<sup>7</sup>": 0.2015,
+      "v<sup>7</sup>": 0.056,
+      "I<sup>7</sup>": 0.0523,
+      "V<sup>7</sup>/V": 0.0485,
+      "V<sup>7</sup>": 0.0411,
+      "II<sup>7</sup>": 0.0225,
+      "V<sup>7</sup>/vi": 0.0186
+    },
+    "dom13": {
+      "min7": 0.7,
+      "min": 0.3
+    },
+    "sus2": {
+      "sus2": 0.4375,
+      "dom7": 0.25,
+      "dom7alt": 0.1875,
+      "maj7": 0.125
+    },
+    "dom7": {
+      "maj7": 0.4125,
+      "min7": 0.2492,
+      "dom7": 0.2437,
+      "min": 0.0515,
+      "maj": 0.0431
+    },
+    "V<sup>7</sup>/V": {
+      "V<sup>7</sup>": 0.64,
+      "ii<sup>7</sup>": 0.1215,
+      "iii<sup>7</sup>": 0.0827,
+      "V<sup>7</sup>/ii": 0.0536,
+      "V#7": 0.0487,
+      "IV<sup>7</sup>": 0.034,
+      "vi<sup>7</sup>": 0.0194
+    },
+    "iii<sup>7</sup>": {
+      "vi<sup>7</sup>": 0.349,
+      "IV<sup>7</sup>": 0.3161,
+      "ii<sup>7</sup>": 0.2524,
+      "V<sup>7</sup>/ii": 0.059,
+      "v<sup>7</sup>": 0.0235
+    },
+    "min": {
+      "min7": 0.4878,
+      "half_dim7": 0.2195,
+      "maj7": 0.0976,
+      "dom7": 0.0732,
+      "maj": 0.0732,
+      "dom7alt": 0.0487
+    },
+    "min9": {
+      "half_dim7": 1.0
+    },
+    "IV<sup>7</sup>": {
+      "iii<sup>7</sup>": 0.3643,
+      "ii<sup>7</sup>": 0.1673,
+      "I<sup>7</sup>": 0.1338,
+      "vi<sup>7</sup>": 0.1227,
+      "V<sup>7</sup>": 0.0854,
+      "V<sup>7</sup>/vi": 0.0854,
+      "iv<sup>7</sup>": 0.0223,
+      "vii<sup>??</sup><sup>7</sup>": 0.0187
+    },
+    "V<sup>7</sup>/ii": {
+      "ii<sup>7</sup>": 0.6555,
+      "V<sup>7</sup>/V": 0.2534,
+      "II<sup>7</sup>": 0.0358,
+      "IV<sup>7</sup>": 0.0331,
+      "vii<sup>??</sup><sup>7</sup>": 0.0222
+    },
+    "dom7alt": {
+      "min7": 0.5068,
+      "min": 0.1645,
+      "maj7": 0.1507,
+      "half_dim7": 0.0958,
+      "dom7": 0.0822
+    },
+    "maj": {
+      "dom7": 0.3611,
+      "min7": 0.2501,
+      "maj": 0.2501,
+      "dom7alt": 0.0833,
+      "maj7": 0.0278,
+      "half_dim7": 0.0278
+    },
+    "maj7": {
+      "min7": 0.3636,
+      "dom7": 0.2576,
+      "maj7": 0.1869,
+      "half_dim7": 0.1515,
+      "dom7alt": 0.0404
+    },
+    "dom9": {
+      "min7": 0.4,
+      "dom9": 0.4,
+      "dom7": 0.2
+    },
+    "dim7": {
+      "min7": 0.6153,
+      "maj7": 0.2307,
+      "maj": 0.077,
+      "dom7": 0.077
+    },
+    "vii<sup>??</sup><sup>7</sup>": {
+      "V<sup>7</sup>/vi": 0.709,
+      "ii<sup>7</sup>": 0.0727,
+      "iii<sup>7</sup>": 0.0697,
+      "vi<sup>7</sup>": 0.0364,
+      "I<sup>7</sup>": 0.0303,
+      "V<sup>7</sup>": 0.0272,
+      "ii<sup>??</sup><sup>7</sup>": 0.0182,
+      "IV<sup>7</sup>/IV": 0.0182,
+      "v<sup>7</sup>": 0.0182
+    },
+    "I<sup>7</sup>": {
+      "IV<sup>7</sup>": 0.3505,
+      "ii<sup>7</sup>": 0.159,
+      "vi<sup>7</sup>": 0.1379,
+      "V<sup>7</sup>/IV": 0.0818,
+      "iii<sup>7</sup>": 0.0748,
+      "vii<sup>7</sup>": 0.0466,
+      "V<sup>7</sup>/iii": 0.0303,
+      "V<sup>7</sup>/ii": 0.028,
+      "IV<sup>7</sup>/IV": 0.0233,
+      "V<sup>7</sup>/vi": 0.0233,
+      "v<sup>7</sup>": 0.0233,
+      "vii<sup>??</sup><sup>7</sup>": 0.021
+    },
+    "maj13": {
+      "min": 0.6667,
+      "dom7": 0.3332
+    }
+  },
+  "chord_weights": {
+    "V<sup>7</sup>/IV": 0.9999,
+    "V<sup>7</sup>": 1.0,
+    "half_dim7": 1.0,
+    "V<sup>7</sup>/vi": 1.0,
+    "min7": 1.0001,
+    "ii<sup>7</sup>": 1.0001,
+    "vi<sup>7</sup>": 1.0,
+    "dom13": 1.0,
+    "sus2": 1.0,
+    "dom7": 1.0,
+    "V<sup>7</sup>/V": 0.9999,
+    "iii<sup>7</sup>": 1.0,
+    "min": 1.0,
+    "min9": 1.0,
+    "IV<sup>7</sup>": 0.9999,
+    "V<sup>7</sup>/ii": 1.0,
+    "dom7alt": 1.0,
+    "maj": 1.0002,
+    "maj7": 1.0,
+    "dom9": 1.0,
+    "dim7": 1.0,
+    "vii<sup>??</sup><sup>7</sup>": 0.9999,
+    "I<sup>7</sup>": 0.9998,
+    "maj13": 0.9999
+  },
+  "total_chords": 24
+}
