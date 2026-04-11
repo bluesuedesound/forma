@@ -79,10 +79,11 @@ juce::String SuggestionEngine::getZoneKey (int moodIndex, float colorAmount) con
 {
     static const char* MOOD_NAMES[] = {
         "bright", "warm", "dream", "deep",
-        "hollow", "tender", "tense", "dusk"
+        "hollow", "tender", "tense", "dusk",
+        "crest", "nocturne", "shimmer", "static"
     };
 
-    if (moodIndex < 0 || moodIndex > 7)
+    if (moodIndex < 0 || moodIndex > 11)
         return "bright_zone1";
 
     juce::String moodName = MOOD_NAMES[moodIndex];
@@ -226,6 +227,93 @@ void SuggestionEngine::loadZonesFromBinaryData()
         zoneModels[zoneKey] = std::move (model);
         DBG ("Zone preloaded: " + zoneKey
              + " (" + juce::String ((int) zoneModels[zoneKey].size()) + " from-degrees)");
+    }
+
+    // Step 3: Load pack zones (Bright Lights)
+    {
+        struct PackZone { const char* binaryName; const char* zoneKey; const char* mood; int zoneNum; };
+        static const PackZone packZones[] = {
+            { "packs_bright_lights_crest_zone1_json",    "crest_zone1",    "crest",    1 },
+            { "packs_bright_lights_crest_zone2_json",    "crest_zone2",    "crest",    2 },
+            { "packs_bright_lights_crest_zone3_json",    "crest_zone3",    "crest",    3 },
+            { "packs_bright_lights_crest_zone4_json",    "crest_zone4",    "crest",    4 },
+            { "packs_bright_lights_nocturne_zone1_json", "nocturne_zone1", "nocturne", 1 },
+            { "packs_bright_lights_nocturne_zone2_json", "nocturne_zone2", "nocturne", 2 },
+            { "packs_bright_lights_nocturne_zone3_json", "nocturne_zone3", "nocturne", 3 },
+            { "packs_bright_lights_shimmer_zone1_json",  "shimmer_zone1",  "shimmer",  1 },
+            { "packs_bright_lights_shimmer_zone2_json",  "shimmer_zone2",  "shimmer",  2 },
+            { "packs_bright_lights_shimmer_zone3_json",  "shimmer_zone3",  "shimmer",  3 },
+            { "packs_bright_lights_static_zone1_json",   "static_zone1",   "static",   1 },
+            { "packs_bright_lights_static_zone2_json",   "static_zone2",   "static",   2 },
+            { "packs_bright_lights_static_zone3_json",   "static_zone3",   "static",   3 },
+        };
+
+        for (auto& pz : packZones)
+        {
+            int dataSize = 0;
+            auto* data = BinaryData::getNamedResource (pz.binaryName, dataSize);
+            if (data == nullptr || dataSize == 0)
+            {
+                DBG ("Pack zone binary not found: " + juce::String (pz.binaryName));
+                continue;
+            }
+
+            auto zoneJson = juce::JSON::parse (juce::String::fromUTF8 (data, dataSize));
+            if (zoneJson.isVoid() || ! zoneJson.hasProperty ("transitions"))
+            {
+                DBG ("Pack zone parse failed: " + juce::String (pz.zoneKey));
+                continue;
+            }
+
+            auto transVar = zoneJson.getProperty ("transitions", {});
+            auto* transObj = transVar.getDynamicObject();
+            if (transObj == nullptr) continue;
+
+            FirstOrderModel model;
+            std::map<int, float> rawSums;
+
+            for (auto& fromEntry : transObj->getProperties())
+            {
+                int fromDeg = romanToInt (fromEntry.name.toString());
+                if (fromDeg < 0) continue;
+
+                auto* toObj = fromEntry.value.getDynamicObject();
+                if (toObj == nullptr) continue;
+
+                for (auto& toEntry : toObj->getProperties())
+                {
+                    int toDeg = romanToInt (toEntry.name.toString());
+                    if (toDeg < 0) continue;
+
+                    float prob = (float)(double) toEntry.value;
+                    model[fromDeg][toDeg] += prob;
+                    rawSums[fromDeg] += prob;
+                }
+            }
+
+            for (auto& fromEntry : model)
+            {
+                float total = rawSums[fromEntry.first];
+                if (total > 0.0f && std::abs (total - 1.0f) > 0.001f)
+                    for (auto& toEntry : fromEntry.second)
+                        toEntry.second /= total;
+            }
+
+            juce::String key (pz.zoneKey);
+            zoneModels[key] = std::move (model);
+            DBG ("Pack zone preloaded: " + key
+                 + " (" + juce::String ((int) zoneModels[key].size()) + " from-degrees)");
+
+            // Update mood zone counts
+            juce::String moodName (pz.mood);
+            auto& count = moodZoneCounts[moodName];
+            if (pz.zoneNum > count)
+                count = pz.zoneNum;
+        }
+
+        DBG ("Pack zones loaded. Updated mood zone counts:");
+        for (auto& kv : moodZoneCounts)
+            DBG ("  " + kv.first + ": " + juce::String (kv.second) + " zones");
     }
 
     zonesLoaded = true;
@@ -374,6 +462,10 @@ float SuggestionEngine::phraseScore (const juce::String& mood, int anchor,
         { "Tender",  { {1,1.0f}, {4,0.6f}, {6,0.5f} } },
         { "Tense",   { {1,1.0f}, {5,0.9f}, {7,0.7f} } },
         { "Dusk",    { {1,1.0f}, {7,0.8f}, {4,0.6f} } },
+        { "Crest",    { {1,1.0f}, {6,0.6f}, {4,0.4f} } },
+        { "Nocturne", { {1,1.0f}, {7,0.8f}, {6,0.6f} } },
+        { "Shimmer",  { {1,1.0f}, {7,0.7f}, {4,0.5f} } },
+        { "Static",   { {1,0.8f}, {4,0.7f}, {5,0.6f} } },
     };
 
     float score = 0.0f;
@@ -414,6 +506,10 @@ float SuggestionEngine::surpriseScore (const juce::String& mood, int candidate,
         { "Tender",  {2,4,6} },
         { "Tense",   {6,3,7} },
         { "Dusk",    {2,6,3} },
+        { "Crest",    {2,3,6,7} },
+        { "Nocturne", {6,3,7} },
+        { "Shimmer",  {2,3,6} },
+        { "Static",   {2,6,7} },
     };
 
     auto it = interesting.find (mood.toStdString());

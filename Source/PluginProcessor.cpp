@@ -388,11 +388,20 @@ static const MoodDef kMoodDefs[] = {
     { Arpeggiator::Pattern::Cascade, 2.0f,  0.65f, 0.35f, 0.20f, 0.55f, 1, -2, true  },
     // Dusk:    Groove,  rate 1x,   gate 0.75
     { Arpeggiator::Pattern::Groove,  1.0f,  0.75f, 0.50f, 0.40f, 0.55f, 1,  0, false },
+    // ── Bright Lights pack ──
+    // Crest:   Rise,    rate 1x,   gate 0.70 — clean pop
+    { Arpeggiator::Pattern::Rise,    1.0f,  0.70f, 0.25f, 0.10f, 0.45f, 1,  0, false },
+    // Nocturne: Pulse,  rate 0.5x, gate 0.80 — dark minor
+    { Arpeggiator::Pattern::Pulse,   0.5f,  0.80f, 0.40f, 0.30f, 0.35f, 1, -1, false },
+    // Shimmer: Spiral,  rate 1x,   gate 0.75 — synth
+    { Arpeggiator::Pattern::Spiral,  1.0f,  0.75f, 0.35f, 0.20f, 0.50f, 1,  1, false },
+    // Static:  Cascade, rate 2x,   gate 0.65 — hyperpop
+    { Arpeggiator::Pattern::Cascade, 2.0f,  0.65f, 0.20f, 0.15f, 0.50f, 1,  0, false },
 };
 
 void FormaProcessor::applyMoodDefaults (int moodIndex)
 {
-    if (moodIndex < 0 || moodIndex >= 8) return;
+    if (moodIndex < 0 || moodIndex >= 12) return;
     const auto& d = kMoodDefs[moodIndex];
 
     arpeggiator.setPattern (d.pattern);
@@ -418,7 +427,9 @@ float FormaProcessor::getDriftForMoodAndFeel (float feel)
     static const std::map<juce::String, float> ceilings = {
         { "Bright", 0.15f }, { "Warm", 0.35f }, { "Dream", 0.25f },
         { "Deep",   0.45f }, { "Hollow", 0.10f }, { "Tender", 0.40f },
-        { "Tense",  0.20f }, { "Dusk", 0.40f }
+        { "Tense",  0.20f }, { "Dusk", 0.40f },
+        { "Crest", 0.10f }, { "Nocturne", 0.30f },
+        { "Shimmer", 0.20f }, { "Static", 0.15f }
     };
     auto it = ceilings.find (harmonyEngine.getCurrentMood());
     float ceiling = (it != ceilings.end()) ? it->second : 0.2f;

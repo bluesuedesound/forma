@@ -52,6 +52,20 @@ juce_add_binary_data(FormaData SOURCES
     Resources/zones/dusk_zone2.json
     Resources/zones/dusk_zone3.json
     Resources/zones/dusk_zone4.json
+    Resources/packs/bright_lights/pack_index.json
+    Resources/packs/bright_lights/crest_zone1.json
+    Resources/packs/bright_lights/crest_zone2.json
+    Resources/packs/bright_lights/crest_zone3.json
+    Resources/packs/bright_lights/crest_zone4.json
+    Resources/packs/bright_lights/nocturne_zone1.json
+    Resources/packs/bright_lights/nocturne_zone2.json
+    Resources/packs/bright_lights/nocturne_zone3.json
+    Resources/packs/bright_lights/shimmer_zone1.json
+    Resources/packs/bright_lights/shimmer_zone2.json
+    Resources/packs/bright_lights/shimmer_zone3.json
+    Resources/packs/bright_lights/static_zone1.json
+    Resources/packs/bright_lights/static_zone2.json
+    Resources/packs/bright_lights/static_zone3.json
 )
 
 target_sources(Forma PRIVATE

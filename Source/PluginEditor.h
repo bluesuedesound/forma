@@ -25,15 +25,21 @@ struct MoodInfo {
     const char* desc;
     juce::uint32 bgColor;
 };
+static constexpr int kNumMoods = 12;
 static const MoodInfo kMoods[] = {
-    { "Bright",  "open \xc2\xb7 resolved",     0xFF1C1A12 },
-    { "Warm",    "groove \xc2\xb7 golden",      0xFF1C1810 },
-    { "Dream",   "floating \xc2\xb7 cinematic", 0xFF141418 },
-    { "Deep",    "rich \xc2\xb7 soulful",       0xFF161412 },
-    { "Hollow",  "sparse \xc2\xb7 melancholy",  0xFF121418 },
-    { "Tender",  "intimate \xc2\xb7 nocturnal",  0xFF1A1416 },
-    { "Tense",   "dramatic \xc2\xb7 urgent",    0xFF141416 },
-    { "Dusk",    "warm \xc2\xb7 unresolved",    0xFF1A1610 },
+    { "Bright",   "open \xc2\xb7 resolved",     0xFF1C1A12 },
+    { "Warm",     "groove \xc2\xb7 golden",      0xFF1C1810 },
+    { "Dream",    "floating \xc2\xb7 cinematic", 0xFF141418 },
+    { "Deep",     "rich \xc2\xb7 soulful",       0xFF161412 },
+    { "Hollow",   "sparse \xc2\xb7 melancholy",  0xFF121418 },
+    { "Tender",   "intimate \xc2\xb7 nocturnal",  0xFF1A1416 },
+    { "Tense",    "dramatic \xc2\xb7 urgent",    0xFF141416 },
+    { "Dusk",     "warm \xc2\xb7 unresolved",    0xFF1A1610 },
+    // ── Bright Lights pack ──
+    { "Crest",    "airy \xc2\xb7 pop",           0xFF141820 },
+    { "Nocturne", "dark \xc2\xb7 minor",         0xFF121218 },
+    { "Shimmer",  "silver \xc2\xb7 synth",       0xFF141618 },
+    { "Static",   "hot \xc2\xb7 hyperpop",       0xFF1A1218 },
 };
 
 enum ChordQuality { Major, Minor, Diminished, Augmented };

@@ -234,7 +234,7 @@ void FormaEditor::setMood (int idx)
     moodTransProgress = 0.0f;
 
     // Start bg color transition
-    targetBgColor = juce::Colour (kMoods[idx].bgColor);
+    targetBgColor = juce::Colour (kMoods[juce::jlimit (0, kNumMoods - 1, idx)].bgColor);
     bgTransProgress = 0.0f;
 
     updateChordLabels();
@@ -253,7 +253,7 @@ void FormaEditor::syncUIFromProcessor()
 {
     // Mood
     auto mood = proc.harmonyEngine.getCurrentMood();
-    for (int i = 0; i < 7; ++i)
+    for (int i = 0; i < kNumMoods; ++i)
     {
         if (HarmonyEngine::moodNames[i] == mood)
         {
@@ -443,9 +443,21 @@ void FormaEditor::drawLeftCol (juce::Graphics& g)
     g.drawText ("MOOD", juce::Rectangle<int> (px, py, 80, 12), juce::Justification::centredLeft);
     py += 18;
 
-    // 8 mood items
-    for (int i = 0; i < 8; ++i)
+    // 12 mood items (8 core + 4 pack)
+    for (int i = 0; i < kNumMoods; ++i)
     {
+        // Separator before pack moods
+        if (i == 8)
+        {
+            g.setColour (BORDER);
+            g.drawHorizontalLine (py + 2, (float) px, (float)(px + 123));
+            g.setFont (mono (7.0f));
+            g.setColour (TXT_DIM);
+            g.drawText ("BRIGHT LIGHTS", juce::Rectangle<int> (px, py + 5, 123, 10),
+                        juce::Justification::centred);
+            py += 18;
+        }
+
         auto pr = juce::Rectangle<int> (px, py, 123, 23);
         bool active = (i == moodIdx);
         bool hover  = (i == hoveredMoodIdx && !active);
@@ -606,7 +618,7 @@ struct MoodThermalDef {
     int wCount;
     juce::uint32 dotStroke;
 };
-static const MoodThermalDef kMoodThermals[8] = {
+static const MoodThermalDef kMoodThermals[kNumMoods] = {
     // Bright: warm amber, medium
     { 0xFF080602,0xFF140E04,0xFF3A200A,0xFF704010,0xFFA06020,0xFFC88838,38, {3,7,13,0},{7.0f,3.5f,1.7f,0},{2.0f,3.5f,5.5f,0},3, 0xFFA07828 },
     // Warm: golden, groove
@@ -623,12 +635,21 @@ static const MoodThermalDef kMoodThermals[8] = {
     { 0xFF0A0302,0xFF180604,0xFF3C1008,0xFF681A0C,0xFF902814,0xFFB04020,10, {5,9,17,23},{5.6f,4.2f,2.8f,1.4f},{5.5f,8.75f,12.0f,9.75f},4, 0xFFA03018 },
     // Dusk: warm gold, layered
     { 0xFF090802,0xFF140C02,0xFF382008,0xFF6A440E,0xFF9C6C18,0xFFC49028,38, {1.8f,4,7,12},{9.8f,5.6f,2.8f,2.1f},{1.13f,1.88f,1.38f,2.50f},4, 0xFFB08020 },
+    // ── Bright Lights pack ──
+    // Crest: sky blue to warm white — clean, airy, bouncy
+    { 0xFF040810,0xFF0A1420,0xFF1A3050,0xFF3A6088,0xFF5A90B8,0xFF87CEEB,200,{4,8,14,0},{4.0f,2.0f,1.0f,0},{1.2f,2.0f,3.2f,0},3, 0xFF6AACCC },
+    // Nocturne: deep charcoal to cool blue-violet — slow, breathing
+    { 0xFF060610,0xFF0C0C18,0xFF1A1A30,0xFF2A2A4A,0xFF3A3A5A,0xFF4A4E6B,240,{1.5f,4,9,0},{7.0f,4.0f,2.0f,0},{0.4f,0.7f,0.5f,0},3, 0xFF3A4060 },
+    // Shimmer: cool silver to electric blue — medium, mechanical
+    { 0xFF060810,0xFF0C1218,0xFF1A2430,0xFF344858,0xFF507080,0xFFB0C4DE,210,{2,6,10,0},{3.0f,3.0f,2.0f,0},{0.9f,1.5f,2.1f,0},3, 0xFF7898B0 },
+    // Static: hot pink to electric white — very fast, glitchy
+    { 0xFF100408,0xFF200810,0xFF401020,0xFF802040,0xFFB04060,0xFFFF69B4,330,{6,11,18,25},{3.0f,3.0f,2.0f,1.5f},{3.0f,4.5f,6.0f,5.2f},4, 0xFFD04888 },
 };
 
 void FormaEditor::updateWaveVelocities (int moodIdx)
 {
     static const float kPhaseMults[4] = { 0.7f, 1.13f, 1.87f, 2.51f };
-    auto& mt = kMoodThermals[juce::jlimit (0, 7, moodIdx)];
+    auto& mt = kMoodThermals[juce::jlimit (0, kNumMoods - 1, moodIdx)];
     for (int i = 0; i < mt.wCount; ++i)
     {
         voidPVels[i] = mt.wSpd[i] * 0.55f * kPhaseMults[i];
@@ -639,7 +660,7 @@ void FormaEditor::updateWaveVelocities (int moodIdx)
 
 float FormaEditor::voidRadius (float angle, float dotNX, float dotNY, float circleR)
 {
-    auto& mt = kMoodThermals[juce::jlimit (0, 7, currentThermalIdx)];
+    auto& mt = kMoodThermals[juce::jlimit (0, kNumMoods - 1, currentThermalIdx)];
     float colorAmt = (dotNY + 1.0f) * 0.5f;
     float feelAmt  = (dotNX + 1.0f) * 0.5f;
     float baseVoid = (0.46f - colorAmt * 0.18f) * circleR;
@@ -664,7 +685,7 @@ float FormaEditor::voidRadius (float angle, float dotNX, float dotNY, float circ
 
 void FormaEditor::drawThermalCircle (juce::Graphics& g, juce::Point<float> centre, float radius)
 {
-    auto& mt = kMoodThermals[juce::jlimit (0, 7, currentThermalIdx)];
+    auto& mt = kMoodThermals[juce::jlimit (0, kNumMoods - 1, currentThermalIdx)];
     float cx = centre.x, cy = centre.y;
 
     float dotNX = dotX * 2.0f - 1.0f;
@@ -754,7 +775,7 @@ void FormaEditor::drawThermalCircle (juce::Graphics& g, juce::Point<float> centr
 
 void FormaEditor::drawThermalDot (juce::Graphics& g, float dpx, float dpy)
 {
-    auto& mt = kMoodThermals[juce::jlimit (0, 7, currentThermalIdx)];
+    auto& mt = kMoodThermals[juce::jlimit (0, kNumMoods - 1, currentThermalIdx)];
     g.setColour (juce::Colour (0xFF060504));
     g.fillEllipse (dpx - 5.0f, dpy - 5.0f, 10.0f, 10.0f);
     g.setColour (juce::Colour (mt.dotStroke));
@@ -1383,9 +1404,10 @@ void FormaEditor::mouseMove (const juce::MouseEvent& e)
     int newHoveredMood = -1;
     int moodStartY = leftCol.getY() + 20 + 18;
     int moodPx = leftCol.getX() + 15;
-    for (int i = 0; i < 8; ++i)
+    for (int i = 0; i < kNumMoods; ++i)
     {
-        auto mr = juce::Rectangle<int> (moodPx, moodStartY + i * 25, 123, 23);
+        int yOff = i * 25 + (i >= 8 ? 18 : 0);  // separator offset for pack moods
+        auto mr = juce::Rectangle<int> (moodPx, moodStartY + yOff, 123, 23);
         if (mr.contains (pos)) { newHoveredMood = i; break; }
     }
     hoveredMoodIdx = newHoveredMood;
@@ -1733,9 +1755,10 @@ void FormaEditor::mouseDown (const juce::MouseEvent& e)
 
     // ── Mood list ��─
     int moodStartY = leftCol.getY() + 20 + 18;
-    for (int i = 0; i < 8; ++i)
+    for (int i = 0; i < kNumMoods; ++i)
     {
-        auto mr = juce::Rectangle<int> (leftCol.getX() + 15, moodStartY + i * 25, 123, 23);
+        int yOff = i * 25 + (i >= 8 ? 18 : 0);
+        auto mr = juce::Rectangle<int> (leftCol.getX() + 15, moodStartY + yOff, 123, 23);
         if (mr.contains (pos)) { setMood (i); return; }
     }
 }

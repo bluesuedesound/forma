@@ -11,7 +11,8 @@ const juce::String HarmonyEngine::notesFlat[12] =
 // ── Mood names ─────────────────────────────────────────────────────────────
 
 const juce::StringArray HarmonyEngine::moodNames =
-    { "Bright", "Warm", "Dream", "Deep", "Hollow", "Tender", "Tense", "Dusk" };
+    { "Bright", "Warm", "Dream", "Deep", "Hollow", "Tender", "Tense", "Dusk",
+      "Crest", "Nocturne", "Shimmer", "Static" };
 
 // ── Mood intervals ─────────────────────────────────────────────────────────
 
@@ -30,8 +31,13 @@ static const MoodData moods[] = {
     { "Tender",  {0,2,3,5,7,9,11},  {"m","m","A","M","M","d","d"} },
     { "Tense",   {0,2,3,5,7,8,11},  {"m","d","M","m","M","M","d"} },
     { "Dusk",    {0,2,3,5,7,9,10},  {"m","m","M","M","m","m","M"} },
+    // ── Bright Lights pack ──
+    { "Crest",    {0,2,4,5,7,9,11},  {"M","m","m","M","M","m","d"} },
+    { "Nocturne", {0,2,3,5,7,8,10},  {"m","d","M","m","m","M","M"} },
+    { "Shimmer",  {0,2,4,5,7,9,10},  {"M","m","d","M","m","m","M"} },
+    { "Static",   {0,2,4,5,7,9,10},  {"M","M","m","M","M","m","M"} },
 };
-static constexpr int numMoods = 8;
+static constexpr int numMoods = 12;
 
 static const MoodData* findMood (const juce::String& name)
 {
@@ -122,6 +128,49 @@ HarmonyEngine::ColorEntry HarmonyEngine::getColorEntry (
             case 5: return {1, 2, 0.30f};  // Gm -> Gm7 -> Gm9
             case 6: return {1, 2, 0.30f};  // Am -> Am7
             case 7: return {1, 2, 0.30f};  // Bb -> Bbmaj7
+        }
+    }
+
+    else if (mood == "Crest")
+    {
+        switch (degree) {
+            case 1: return {1, 1, 1.1f};   // stays triad
+            case 2: return {1, 2, 0.35f};  // min7 at mid Color
+            case 3: return {1, 2, 0.55f};  // min7 at mid-high
+            case 4: return {1, 2, 0.45f};  // add9 at mid, maj7 at high
+            case 5: return {1, 2, 0.30f};  // dom7 early
+            case 6: return {1, 2, 0.60f};  // min7 at high Color
+            case 7: return {1, 2, 0.80f};  // half-dim7 late
+        }
+    }
+    else if (mood == "Nocturne")
+    {
+        switch (degree) {
+            case 1: return {1, 2, 0.70f};  // minor, stays pure low
+            case 2: return {1, 2, 0.50f};  // half-dim → min7 at mid
+            case 3: return {1, 2, 0.55f};  // major, maj7 at mid
+            case 4: return {1, 2, 0.70f};  // minor, becomes major at high
+            case 5: return {1, 2, 0.40f};  // minor → dom7 at mid
+            case 6: return {1, 2, 0.55f};  // major, maj7
+            case 7: return {1, 2, 0.60f};  // major, dom7
+        }
+    }
+    else if (mood == "Shimmer")
+    {
+        switch (degree) {
+            case 1: return {1, 2, 0.25f};  case 2: return {1, 2, 0.55f};
+            case 3: return {1, 1, 1.1f};   case 4: return {1, 2, 0.45f};
+            case 5: return {1, 1, 1.1f};   case 6: return {1, 2, 0.50f};
+            case 7: return {1, 2, 0.60f};
+        }
+    }
+    else if (mood == "Static")
+    {
+        switch (degree) {
+            case 1: return {1, 2, 0.50f};  case 2: return {1, 2, 0.50f};
+            case 3: return {1, 2, 0.55f};  case 4: return {1, 2, 0.45f};
+            case 5: return {1, 2, 0.30f};  case 6: return {1, 2, 0.55f};
+            case 7: return {1, 2, 0.60f};
         }
     }
 
@@ -306,7 +355,11 @@ int HarmonyEngine::getMoodRegisterTarget (const juce::String& mood)
     if (mood == "Bright")  return 55;
     if (mood == "Tender")  return 57;
     if (mood == "Dream")   return 59;
-    if (mood == "Dusk")    return 53;
+    if (mood == "Dusk")     return 53;
+    if (mood == "Crest")    return 55;
+    if (mood == "Nocturne") return 50;
+    if (mood == "Shimmer")  return 54;
+    if (mood == "Static")   return 55;
     return 55;
 }
 
