@@ -1,0 +1,132 @@
+{
+  "pack": "bright_lights",
+  "name": "Bright Lights",
+  "description": "Pop \u2014 mainstream, dark, synth, hyperpop",
+  "moods": {
+    "Crest": {
+      "zones": 4,
+      "mode": "major",
+      "color_label": [
+        "CLEAN",
+        "BRIGHT"
+      ]
+    },
+    "Nocturne": {
+      "zones": 3,
+      "mode": "aeolian",
+      "color_label": [
+        "DARK",
+        "LIGHT"
+      ]
+    },
+    "Shimmer": {
+      "zones": 3,
+      "mode": "major",
+      "color_label": [
+        "GROUNDED",
+        "SUSPENDED"
+      ]
+    },
+    "Static": {
+      "zones": 3,
+      "mode": "major",
+      "color_label": [
+        "TONAL",
+        "CHROMATIC"
+      ]
+    }
+  },
+  "zones": {
+    "crest_zone1": {
+      "mood": "Crest",
+      "zone": 1,
+      "name": "Clean",
+      "description": "Plain triads \u2014 Taylor Swift, One Direction, Katy Perry",
+      "mode": "major"
+    },
+    "crest_zone2": {
+      "mood": "Crest",
+      "zone": 2,
+      "name": "Warm",
+      "description": "Add9 \u2014 Coldplay, Maroon 5, OneRepublic",
+      "mode": "major"
+    },
+    "crest_zone3": {
+      "mood": "Crest",
+      "zone": 3,
+      "name": "Shimmer",
+      "description": "IVmaj7, vim7 \u2014 radio pop ballads, piano pop",
+      "mode": "major"
+    },
+    "crest_zone4": {
+      "mood": "Crest",
+      "zone": 4,
+      "name": "Float",
+      "description": "vim7, IVmaj9 \u2014 John Legend, Alicia Keys, Bruno Mars",
+      "mode": "major"
+    },
+    "nocturne_zone1": {
+      "mood": "Nocturne",
+      "zone": 1,
+      "name": "Dark",
+      "description": "Pure Aeolian \u2014 Lana Del Rey, early Lorde, The 1975",
+      "mode": "aeolian"
+    },
+    "nocturne_zone2": {
+      "mood": "Nocturne",
+      "zone": 2,
+      "name": "Dusk",
+      "description": "bVI/bVII prominent \u2014 Billie Eilish, Lorde Melodrama",
+      "mode": "aeolian"
+    },
+    "nocturne_zone3": {
+      "mood": "Nocturne",
+      "zone": 3,
+      "name": "Break",
+      "description": "Parallel major borrowing \u2014 Billie Eilish picardy, Lorde",
+      "mode": "aeolian"
+    },
+    "shimmer_zone1": {
+      "mood": "Shimmer",
+      "zone": 1,
+      "name": "Grounded",
+      "description": "Clear Mixolydian \u2014 The Weeknd, M83, Chromatics",
+      "mode": "major"
+    },
+    "shimmer_zone2": {
+      "mood": "Shimmer",
+      "zone": 2,
+      "name": "Float",
+      "description": "Suspended \u2014 Com Truise, Tame Impala, MEW",
+      "mode": "major"
+    },
+    "shimmer_zone3": {
+      "mood": "Shimmer",
+      "zone": 3,
+      "name": "Suspended",
+      "description": "Full suspension \u2014 no thirds",
+      "mode": "major"
+    },
+    "static_zone1": {
+      "mood": "Static",
+      "zone": 1,
+      "name": "Tonal",
+      "description": "Diatonic pop base \u2014 Charli XCX early work, Carly Rae Jepsen",
+      "mode": "major"
+    },
+    "static_zone2": {
+      "mood": "Static",
+      "zone": 2,
+      "name": "Glitch",
+      "description": "Chromatic neighbors begin \u2014 100 gecs, SOPHIE",
+      "mode": "major"
+    },
+    "static_zone3": {
+      "mood": "Static",
+      "zone": 3,
+      "name": "Chromatic",
+      "description": "Full chromaticism \u2014 PC Music, Charli XCX Brat, AG Cook",
+      "mode": "major"
+    }
+  }
+}

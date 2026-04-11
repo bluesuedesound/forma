@@ -1,0 +1,75 @@
+{
+  "zone": "nocturne_zone2",
+  "mood": "Nocturne",
+  "zone_number": 2,
+  "name": "Dusk",
+  "description": "bVI/bVII prominent \u2014 Billie Eilish, Lorde Melodrama",
+  "mode": "aeolian",
+  "extension_range": [
+    0,
+    1
+  ],
+  "chordonomicon_songs": 4548,
+  "transitions": {
+    "i": {
+      "v": 0.1927,
+      "ii": 0.1796,
+      "i": 0.1629,
+      "iv": 0.1621,
+      "bVII": 0.1324,
+      "bIII": 0.086,
+      "bVI": 0.0843
+    },
+    "bVI": {
+      "i": 0.4096,
+      "bVII": 0.1852,
+      "bIII": 0.1698,
+      "iv": 0.1374,
+      "v": 0.0753,
+      "bVI": 0.0175
+    },
+    "bIII": {
+      "i": 0.3794,
+      "iv": 0.1706,
+      "bVII": 0.1556,
+      "bVI": 0.1507,
+      "v": 0.0966,
+      "ii": 0.0261,
+      "bIII": 0.021
+    },
+    "v": {
+      "i": 0.5963,
+      "iv": 0.1165,
+      "ii": 0.1078,
+      "bVII": 0.0628,
+      "bVI": 0.0515,
+      "v": 0.0329,
+      "bIII": 0.0321
+    },
+    "bVII": {
+      "i": 0.4582,
+      "iv": 0.1442,
+      "bVI": 0.1124,
+      "bIII": 0.1065,
+      "v": 0.1019,
+      "ii": 0.056,
+      "bVII": 0.0208
+    },
+    "iv": {
+      "i": 0.5323,
+      "v": 0.1288,
+      "bVII": 0.1159,
+      "ii": 0.0757,
+      "bVI": 0.0675,
+      "bIII": 0.0546,
+      "iv": 0.0251
+    },
+    "ii": {
+      "i": 0.5448,
+      "v": 0.2007,
+      "iv": 0.1292,
+      "bVII": 0.0719,
+      "ii": 0.034
+    }
+  }
+}
