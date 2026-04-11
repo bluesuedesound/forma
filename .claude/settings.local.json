@@ -34,7 +34,8 @@
       "Bash(cp /mnt/user-data/outputs/Forma_Documentation.pdf ~/Desktop/Forma-Beta-1.0/)",
       "Bash(zip -r Forma-Beta-1.0.zip Forma-Beta-1.0/)",
       "Bash(unzip -l ~/Desktop/Forma-Beta-1.0.zip)",
-      "Bash(sed:*)"
+      "Bash(sed:*)",
+      "Bash(ls /Users/alexupton/Desktop/forma-vst/Resources/zones/*.json)"
     ]
   }
 }

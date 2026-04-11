@@ -25,6 +25,33 @@ juce_add_plugin(Forma
 
 juce_add_binary_data(FormaData SOURCES
     Resources/forma_suggestions.json
+    Resources/zones/zones_index.json
+    Resources/zones/bright_zone1.json
+    Resources/zones/bright_zone2.json
+    Resources/zones/bright_zone3.json
+    Resources/zones/bright_zone4.json
+    Resources/zones/warm_zone1.json
+    Resources/zones/warm_zone2.json
+    Resources/zones/warm_zone3.json
+    Resources/zones/dream_zone1.json
+    Resources/zones/dream_zone2.json
+    Resources/zones/deep_zone1.json
+    Resources/zones/deep_zone2.json
+    Resources/zones/deep_zone3.json
+    Resources/zones/deep_zone4.json
+    Resources/zones/hollow_zone1.json
+    Resources/zones/hollow_zone2.json
+    Resources/zones/hollow_zone3.json
+    Resources/zones/tender_zone1.json
+    Resources/zones/tender_zone2.json
+    Resources/zones/tender_zone3.json
+    Resources/zones/tense_zone1.json
+    Resources/zones/tense_zone2.json
+    Resources/zones/tense_zone3.json
+    Resources/zones/dusk_zone1.json
+    Resources/zones/dusk_zone2.json
+    Resources/zones/dusk_zone3.json
+    Resources/zones/dusk_zone4.json
 )
 
 target_sources(Forma PRIVATE

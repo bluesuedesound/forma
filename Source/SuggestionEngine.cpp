@@ -1,4 +1,5 @@
 #include "SuggestionEngine.h"
+#include "BinaryData.h"
 
 void SuggestionEngine::loadModel (const juce::var& modelData)
 {
@@ -55,7 +56,210 @@ void SuggestionEngine::loadModel (const juce::var& modelData)
 }
 
 // ═════════════════════════════════════════════════════════════════════════
-// Markov transition probability (second-order → first-order → uniform)
+// Zone system — Roman numeral to integer degree mapping
+// ═════════════════════════════════════════════════════════════════════════
+
+int SuggestionEngine::romanToInt (const juce::String& roman)
+{
+    if (roman == "I"    || roman == "i")                        return 1;
+    if (roman == "II"   || roman == "ii")                       return 2;
+    if (roman == "III"  || roman == "iii"  || roman == "bIII")  return 3;
+    if (roman == "IV"   || roman == "iv")                       return 4;
+    if (roman == "V"    || roman == "v")                        return 5;
+    if (roman == "VI"   || roman == "vi"   || roman == "bVI")   return 6;
+    if (roman == "VII"  || roman == "vii"  || roman == "bVII")  return 7;
+    return -1;
+}
+
+// ═════════════════════════════════════════════════════════════════════════
+// Zone key selection — maps mood index + color amount to a zone key
+// ═════════════════════════════════════════════════════════════════════════
+
+juce::String SuggestionEngine::getZoneKey (int moodIndex, float colorAmount) const
+{
+    static const char* MOOD_NAMES[] = {
+        "bright", "warm", "dream", "deep",
+        "hollow", "tender", "tense", "dusk"
+    };
+
+    if (moodIndex < 0 || moodIndex > 7)
+        return "bright_zone1";
+
+    juce::String moodName = MOOD_NAMES[moodIndex];
+    int maxZones = 2;
+    auto it = moodZoneCounts.find (moodName);
+    if (it != moodZoneCounts.end())
+        maxZones = it->second;
+
+    int zoneNum = 1;
+    if (maxZones == 2)
+    {
+        zoneNum = colorAmount < 0.5f ? 1 : 2;
+    }
+    else if (maxZones == 3)
+    {
+        if      (colorAmount < 0.33f) zoneNum = 1;
+        else if (colorAmount < 0.67f) zoneNum = 2;
+        else                          zoneNum = 3;
+    }
+    else if (maxZones >= 4)
+    {
+        if      (colorAmount < 0.25f) zoneNum = 1;
+        else if (colorAmount < 0.50f) zoneNum = 2;
+        else if (colorAmount < 0.75f) zoneNum = 3;
+        else                          zoneNum = 4;
+    }
+
+    return moodName + "_zone" + juce::String (zoneNum);
+}
+
+// ═════════════════════════════════════════════════════════════════════════
+// Load all zones from BinaryData at startup
+// ═════════════════════════════════════════════════════════════════════════
+
+void SuggestionEngine::loadZonesFromBinaryData()
+{
+    // Step 1: Load zones index
+    int indexSize = 0;
+    auto* indexData = BinaryData::getNamedResource ("zones_index_json", indexSize);
+    if (indexData == nullptr || indexSize == 0)
+    {
+        DBG ("zones_index.json not found in BinaryData — zones disabled");
+        return;
+    }
+
+    auto indexJson = juce::JSON::parse (juce::String::fromUTF8 (indexData, indexSize));
+    if (indexJson.isVoid())
+    {
+        DBG ("zones_index.json parse failed");
+        return;
+    }
+
+    // Build mood zone counts from the index
+    moodZoneCounts.clear();
+    auto* indexObj = indexJson.getDynamicObject();
+    if (indexObj == nullptr) return;
+
+    juce::StringArray zoneKeys;
+
+    for (auto& prop : indexObj->getProperties())
+    {
+        juce::String key = prop.name.toString();
+        int zoneIdx = key.indexOf ("_zone");
+        if (zoneIdx < 0) continue;
+
+        juce::String moodName = key.substring (0, zoneIdx).toLowerCase();
+        int zoneNum = key.substring (zoneIdx + 5).getIntValue();
+
+        auto& count = moodZoneCounts[moodName];
+        if (zoneNum > count)
+            count = zoneNum;
+
+        zoneKeys.add (key);
+    }
+
+    DBG ("Zone index loaded. Moods with zones:");
+    for (auto& kv : moodZoneCounts)
+        DBG ("  " + kv.first + ": " + juce::String (kv.second) + " zones");
+
+    // Step 2: Load each zone's transitions
+    for (auto& zoneKey : zoneKeys)
+    {
+        // BinaryData name: "bright_zone1_json" from "bright_zone1.json"
+        juce::String binaryName = zoneKey + "_json";
+        int dataSize = 0;
+        auto* data = BinaryData::getNamedResource (binaryName.toRawUTF8(), dataSize);
+        if (data == nullptr || dataSize == 0)
+        {
+            DBG ("Zone binary not found: " + binaryName);
+            continue;
+        }
+
+        auto zoneJson = juce::JSON::parse (juce::String::fromUTF8 (data, dataSize));
+        if (zoneJson.isVoid() || ! zoneJson.hasProperty ("transitions"))
+        {
+            DBG ("Zone parse failed: " + zoneKey);
+            continue;
+        }
+
+        // Parse transitions: Roman numerals → integer degrees
+        auto transVar = zoneJson.getProperty ("transitions", {});
+        auto* transObj = transVar.getDynamicObject();
+        if (transObj == nullptr) continue;
+
+        FirstOrderModel model;
+
+        // Accumulate raw probabilities (may merge I/i → 1, V/v → 5, etc.)
+        // rawSums[fromDeg] tracks the total weight for renormalization
+        std::map<int, float> rawSums;
+
+        for (auto& fromEntry : transObj->getProperties())
+        {
+            int fromDeg = romanToInt (fromEntry.name.toString());
+            if (fromDeg < 0) continue;
+
+            auto* toObj = fromEntry.value.getDynamicObject();
+            if (toObj == nullptr) continue;
+
+            for (auto& toEntry : toObj->getProperties())
+            {
+                int toDeg = romanToInt (toEntry.name.toString());
+                if (toDeg < 0) continue;
+
+                float prob = (float)(double) toEntry.value;
+                model[fromDeg][toDeg] += prob;
+                rawSums[fromDeg] += prob;
+            }
+        }
+
+        // Renormalize each from-degree row (handles merged variants)
+        for (auto& fromEntry : model)
+        {
+            float total = rawSums[fromEntry.first];
+            if (total > 0.0f && std::abs (total - 1.0f) > 0.001f)
+            {
+                for (auto& toEntry : fromEntry.second)
+                    toEntry.second /= total;
+            }
+        }
+
+        zoneModels[zoneKey] = std::move (model);
+        DBG ("Zone preloaded: " + zoneKey
+             + " (" + juce::String ((int) zoneModels[zoneKey].size()) + " from-degrees)");
+    }
+
+    zonesLoaded = true;
+    DBG ("All zones preloaded: " + juce::String ((int) zoneModels.size()) + " zone models");
+
+    // Load default zone: Bright mood (index 0), mid Color
+    updateZone (0, 0.5f);
+}
+
+// ═════════════════════════════════════════════════════════════════════════
+// Update active zone — safe to call from any thread (atomic pointer swap)
+// ═════════════════════════════════════════════════════════════════════════
+
+void SuggestionEngine::updateZone (int moodIndex, float colorAmount)
+{
+    if (! zonesLoaded) return;
+
+    juce::String newKey = getZoneKey (moodIndex, colorAmount);
+    if (newKey == currentZoneKey) return;
+
+    auto it = zoneModels.find (newKey);
+    if (it == zoneModels.end())
+    {
+        DBG ("Zone not found in preloaded models: " + newKey + " — keeping current");
+        return;
+    }
+
+    activeZoneModel.store (&it->second, std::memory_order_release);
+    currentZoneKey = newKey;
+    DBG ("Zone active: " + newKey);
+}
+
+// ═════════════════════════════════════════════════════════════════════════
+// Markov transition probability (zone → second-order → first-order → uniform)
 // ═════════════════════════════════════════════════════════════════════════
 
 float SuggestionEngine::getTransitionProb (const juce::String& mood,
@@ -63,6 +267,7 @@ float SuggestionEngine::getTransitionProb (const juce::String& mood,
 {
     std::string moodStr = mood.toStdString();
 
+    // Second-order: use original model (zones are first-order only)
     if (prevDegree >= 1)
     {
         std::string pairKey = std::to_string (prevDegree) + "," + std::to_string (fromDegree);
@@ -79,6 +284,20 @@ float SuggestionEngine::getTransitionProb (const juce::String& mood,
         }
     }
 
+    // First-order: prefer active zone model over original
+    auto* zone = activeZoneModel.load (std::memory_order_acquire);
+    if (zone != nullptr)
+    {
+        auto fromIt = zone->find (fromDegree);
+        if (fromIt != zone->end())
+        {
+            auto toIt = fromIt->second.find (toDegree);
+            if (toIt != fromIt->second.end())
+                return toIt->second;
+        }
+    }
+
+    // Fallback: original first-order model
     auto moodIt = firstOrder.find (moodStr);
     if (moodIt != firstOrder.end())
     {
@@ -154,6 +373,7 @@ float SuggestionEngine::phraseScore (const juce::String& mood, int anchor,
         { "Hollow",  { {1,1.0f}, {6,0.7f}, {3,0.5f} } },
         { "Tender",  { {1,1.0f}, {4,0.6f}, {6,0.5f} } },
         { "Tense",   { {1,1.0f}, {5,0.9f}, {7,0.7f} } },
+        { "Dusk",    { {1,1.0f}, {7,0.8f}, {4,0.6f} } },
     };
 
     float score = 0.0f;
@@ -193,6 +413,7 @@ float SuggestionEngine::surpriseScore (const juce::String& mood, int candidate,
         { "Hollow",  {6,3,7} },
         { "Tender",  {2,4,6} },
         { "Tense",   {6,3,7} },
+        { "Dusk",    {2,6,3} },
     };
 
     auto it = interesting.find (mood.toStdString());

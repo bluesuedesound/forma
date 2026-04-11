@@ -1,9 +1,9 @@
 {
-  "zone": "deep_zone1",
-  "mood": "Deep",
+  "zone": "dusk_zone1",
+  "mood": "Dusk",
   "zone_number": 1,
-  "name": "Grounded",
-  "description": "Plain triads \u2014 Santana, modal folk",
+  "name": "Earthen",
+  "description": "Plain Dorian triads \u2014 Motown, Aretha",
   "mode": "dorian",
   "extension_range": [
     0,

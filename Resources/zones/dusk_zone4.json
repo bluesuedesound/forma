@@ -1,13 +1,13 @@
 {
-  "zone": "deep_zone3",
-  "mood": "Deep",
-  "zone_number": 3,
-  "name": "Neo-Soul",
-  "description": "9th chords \u2014 D'Angelo, Erykah Badu",
+  "zone": "dusk_zone4",
+  "mood": "Dusk",
+  "zone_number": 4,
+  "name": "Jazz Soul",
+  "description": "Full extensions \u2014 Glasper, Hiatus Kaiyote",
   "mode": "dorian",
   "extension_range": [
     2,
-    2
+    3
   ],
   "corpus_songs": 4,
   "transitions": {

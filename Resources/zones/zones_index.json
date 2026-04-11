@@ -1,0 +1,288 @@
+{
+  "bright_zone1": {
+    "mood": "Bright",
+    "zone": 1,
+    "name": "Open",
+    "description": "Plain triads \u2014 folk, classic pop",
+    "mode": "major",
+    "extension_range": [
+      0,
+      0
+    ]
+  },
+  "bright_zone2": {
+    "mood": "Bright",
+    "zone": 2,
+    "name": "Warm",
+    "description": "Add9 \u2014 indie pop, Coldplay, John Mayer",
+    "mode": "major",
+    "extension_range": [
+      0,
+      1
+    ]
+  },
+  "bright_zone3": {
+    "mood": "Bright",
+    "zone": 3,
+    "name": "Rich",
+    "description": "Major 7ths \u2014 bossa nova, Norah Jones",
+    "mode": "major",
+    "extension_range": [
+      1,
+      1
+    ]
+  },
+  "bright_zone4": {
+    "mood": "Bright",
+    "zone": 4,
+    "name": "Luminous",
+    "description": "9th chords \u2014 Stevie Wonder, Earth Wind & Fire",
+    "mode": "major",
+    "extension_range": [
+      2,
+      3
+    ]
+  },
+  "warm_zone1": {
+    "mood": "Warm",
+    "zone": 1,
+    "name": "Raw",
+    "description": "Plain triads \u2014 blues rock, Hendrix",
+    "mode": "mixolydian",
+    "extension_range": [
+      0,
+      0
+    ]
+  },
+  "warm_zone2": {
+    "mood": "Warm",
+    "zone": 2,
+    "name": "Groove",
+    "description": "Dominant 7ths \u2014 funk, James Brown",
+    "mode": "mixolydian",
+    "extension_range": [
+      1,
+      1
+    ]
+  },
+  "warm_zone3": {
+    "mood": "Warm",
+    "zone": 3,
+    "name": "Golden",
+    "description": "9th/13th \u2014 Curtis Mayfield, EWF",
+    "mode": "mixolydian",
+    "extension_range": [
+      2,
+      3
+    ]
+  },
+  "dream_zone1": {
+    "mood": "Dream",
+    "zone": 1,
+    "name": "Floating",
+    "description": "Plain triads \u2014 film scoring, John Williams",
+    "mode": "lydian",
+    "extension_range": [
+      0,
+      0
+    ]
+  },
+  "dream_zone2": {
+    "mood": "Dream",
+    "zone": 2,
+    "name": "Luminous",
+    "description": "Maj7#11 \u2014 Hisaishi, Zimmer",
+    "mode": "lydian",
+    "extension_range": [
+      1,
+      3
+    ]
+  },
+  "deep_zone1": {
+    "mood": "Deep",
+    "zone": 1,
+    "name": "Grounded",
+    "description": "Plain triads \u2014 Santana, modal folk",
+    "mode": "dorian",
+    "extension_range": [
+      0,
+      0
+    ]
+  },
+  "deep_zone2": {
+    "mood": "Deep",
+    "zone": 2,
+    "name": "Soulful",
+    "description": "Minor 7ths \u2014 Marvin Gaye, Bill Withers",
+    "mode": "dorian",
+    "extension_range": [
+      1,
+      1
+    ]
+  },
+  "deep_zone3": {
+    "mood": "Deep",
+    "zone": 3,
+    "name": "Neo-Soul",
+    "description": "9th chords \u2014 D'Angelo, Erykah Badu",
+    "mode": "dorian",
+    "extension_range": [
+      2,
+      2
+    ]
+  },
+  "deep_zone4": {
+    "mood": "Deep",
+    "zone": 4,
+    "name": "Jazz Dorian",
+    "description": "13th chords \u2014 McCoy Tyner, Herbie Hancock",
+    "mode": "dorian",
+    "extension_range": [
+      2,
+      3
+    ]
+  },
+  "hollow_zone1": {
+    "mood": "Hollow",
+    "zone": 1,
+    "name": "Bare",
+    "description": "Power chords \u2014 post-rock, Sigur Ros",
+    "mode": "aeolian",
+    "extension_range": [
+      0,
+      0
+    ]
+  },
+  "hollow_zone2": {
+    "mood": "Hollow",
+    "zone": 2,
+    "name": "Cold",
+    "description": "Plain minor triads \u2014 Pink Floyd, Radiohead",
+    "mode": "aeolian",
+    "extension_range": [
+      0,
+      0
+    ]
+  },
+  "hollow_zone3": {
+    "mood": "Hollow",
+    "zone": 3,
+    "name": "Atmospheric",
+    "description": "Minor 7ths \u2014 Massive Attack, cinematic",
+    "mode": "aeolian",
+    "extension_range": [
+      1,
+      1
+    ]
+  },
+  "tender_zone1": {
+    "mood": "Tender",
+    "zone": 1,
+    "name": "Intimate",
+    "description": "Melodic minor triads \u2014 simple jazz ballads",
+    "mode": "melodic_minor",
+    "extension_range": [
+      0,
+      0
+    ]
+  },
+  "tender_zone2": {
+    "mood": "Tender",
+    "zone": 2,
+    "name": "Nocturnal",
+    "description": "Melodic minor 7ths \u2014 Miles Davis, Chet Baker",
+    "mode": "melodic_minor",
+    "extension_range": [
+      1,
+      1
+    ]
+  },
+  "tender_zone3": {
+    "mood": "Tender",
+    "zone": 3,
+    "name": "Deep Night",
+    "description": "Full extensions \u2014 Brad Mehldau, Keith Jarrett",
+    "mode": "melodic_minor",
+    "extension_range": [
+      2,
+      3
+    ]
+  },
+  "tense_zone1": {
+    "mood": "Tense",
+    "zone": 1,
+    "name": "Classical",
+    "description": "Plain triads \u2014 Bach, flamenco",
+    "mode": "harmonic_minor",
+    "extension_range": [
+      0,
+      0
+    ]
+  },
+  "tense_zone2": {
+    "mood": "Tense",
+    "zone": 2,
+    "name": "Dramatic",
+    "description": "7th chords \u2014 film noir, tango",
+    "mode": "harmonic_minor",
+    "extension_range": [
+      1,
+      1
+    ]
+  },
+  "tense_zone3": {
+    "mood": "Tense",
+    "zone": 3,
+    "name": "Exotic",
+    "description": "V7b9 \u2014 Phrygian dominant, A Night in Tunisia",
+    "mode": "harmonic_minor",
+    "extension_range": [
+      2,
+      2
+    ]
+  },
+  "dusk_zone1": {
+    "mood": "Dusk",
+    "zone": 1,
+    "name": "Earthen",
+    "description": "Plain Dorian triads \u2014 Motown, Aretha",
+    "mode": "dorian",
+    "extension_range": [
+      0,
+      0
+    ]
+  },
+  "dusk_zone2": {
+    "mood": "Dusk",
+    "zone": 2,
+    "name": "Soul",
+    "description": "7th chords \u2014 What's Going On, classic soul",
+    "mode": "dorian",
+    "extension_range": [
+      1,
+      1
+    ]
+  },
+  "dusk_zone3": {
+    "mood": "Dusk",
+    "zone": 3,
+    "name": "Neo-Soul",
+    "description": "9th chords \u2014 Maxwell, Musiq, John Legend",
+    "mode": "dorian",
+    "extension_range": [
+      1,
+      2
+    ]
+  },
+  "dusk_zone4": {
+    "mood": "Dusk",
+    "zone": 4,
+    "name": "Jazz Soul",
+    "description": "Full extensions \u2014 Glasper, Hiatus Kaiyote",
+    "mode": "dorian",
+    "extension_range": [
+      2,
+      3
+    ]
+  }
+}

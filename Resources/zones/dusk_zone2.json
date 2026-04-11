@@ -1,9 +1,9 @@
 {
-  "zone": "deep_zone2",
-  "mood": "Deep",
+  "zone": "dusk_zone2",
+  "mood": "Dusk",
   "zone_number": 2,
-  "name": "Soulful",
-  "description": "Minor 7ths \u2014 Marvin Gaye, Bill Withers",
+  "name": "Soul",
+  "description": "7th chords \u2014 What's Going On, classic soul",
   "mode": "dorian",
   "extension_range": [
     1,

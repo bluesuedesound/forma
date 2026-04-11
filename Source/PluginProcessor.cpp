@@ -40,6 +40,7 @@ FormaProcessor::FormaProcessor()
                                             BinaryData::forma_suggestions_jsonSize);
     auto parsed = juce::JSON::parse (jsonStr);
     suggestionEngine.loadModel (parsed);
+    suggestionEngine.loadZonesFromBinaryData();
 
     // Factory presets
     {
@@ -816,6 +817,9 @@ void FormaProcessor::recomputeSuggestions()
         return;
     }
 
+    suggestionEngine.updateZone (harmonyEngine.getCurrentMoodIndex(),
+                                 colorAmount.load());
+
     auto sug = suggestionEngine.getSuggestions (
         harmonyEngine.getCurrentMood(),
         anchorDegree,
@@ -1079,6 +1083,9 @@ void FormaProcessor::triggerChord (int degree, juce::uint8 inputVelocity,
     // Immediately update suggestion display on every press
     // (anchor commit in releaseChord updates Markov state later)
     {
+        suggestionEngine.updateZone (harmonyEngine.getCurrentMoodIndex(),
+                                     colorAmount.load());
+
         auto sug = suggestionEngine.getSuggestions (
             harmonyEngine.getCurrentMood(),
             degree,              // use pressed degree as current context
