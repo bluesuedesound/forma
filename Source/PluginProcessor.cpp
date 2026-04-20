@@ -146,6 +146,8 @@ void FormaProcessor::getStateInformation (juce::MemoryBlock& destData)
     xml->setAttribute ("bassOn",  bassEnabledParam.load());
     xml->setAttribute ("bassAlt", bassAltParam.load());
     xml->setAttribute ("bassOct", octaveBassParam.load());
+    xml->setAttribute ("bassTrig",     bassTriggerModeParam.load());
+    xml->setAttribute ("bassTrigNote", bassTriggerNoteParam.load());
 
     // Arp
     xml->setAttribute ("arpEnabled", arpEnabled.load());
@@ -225,6 +227,9 @@ void FormaProcessor::setStateInformation (const void* data, int sizeInBytes)
     bassEnabledParam.store (xml->getBoolAttribute ("bassOn", true));
     bassAltParam.store     (xml->getBoolAttribute ("bassAlt", false));
     octaveBassParam.store  (xml->getIntAttribute  ("bassOct", -1));
+    bassTriggerModeParam.store (xml->getBoolAttribute ("bassTrig", false));
+    bassTriggerNoteParam.store (juce::jlimit (0, 127,
+        xml->getIntAttribute ("bassTrigNote", 0)));
 
     // Arp
     arpEnabled.store (xml->getBoolAttribute ("arpEnabled", false));
@@ -486,6 +491,7 @@ void FormaProcessor::resetPlayingState()
     arpeggiator.reset();
     currentChordNotes.clear();
     currentBassNote = -1;
+    triggeredBassPlaying = -1;
     currentDegree = -1;
     activeDegree.store (-1);
     std::memset (heldDegreeCounts, 0, sizeof (heldDegreeCounts));
@@ -658,10 +664,55 @@ void FormaProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     if (pendingNotes.size() > 32)
         pendingNotes.clear();
 
+    const bool triggerMode = bassTriggerModeParam.load();
+    const int  triggerNote = bassTriggerNoteParam.load();
+
     for (const auto metadata : midiMessages)
     {
         auto msg = metadata.getMessage();
         int pos  = metadata.samplePosition;
+
+        // ── MIDI-triggered bass: intercept trigger note before chord processing ──
+        if (triggerMode && (msg.isNoteOn() || msg.isNoteOff())
+            && msg.getNoteNumber() == triggerNote)
+        {
+            auto outMode = static_cast<OutputMode> (outputMode.load());
+            bool sendBass = (outMode == OutputMode::All || outMode == OutputMode::Bass);
+            int  bassCh   = (outMode == OutputMode::All) ? kBassChannel : 1;
+            int  bassOff  = juce::jmin (pos, currentBlockSize - 1);
+
+            if (msg.isNoteOn() && msg.getVelocity() > 0)
+            {
+                // Release any currently-sounding triggered bass first
+                if (triggeredBassPlaying >= 0)
+                {
+                    if (sendBass)
+                        output.addEvent (juce::MidiMessage::noteOff (bassCh, triggeredBassPlaying), bassOff);
+                    bassSynthMidi.addEvent (juce::MidiMessage::noteOff (1, triggeredBassPlaying), bassOff);
+                    triggeredBassPlaying = -1;
+                }
+                // Fire bass only if a chord has been pressed (valid bass pitch)
+                if (currentBassNote >= 0)
+                {
+                    juce::uint8 vel = msg.getVelocity();
+                    if (sendBass)
+                        output.addEvent (juce::MidiMessage::noteOn (bassCh, currentBassNote, vel), bassOff);
+                    bassSynthMidi.addEvent (juce::MidiMessage::noteOn (1, currentBassNote, vel), bassOff);
+                    triggeredBassPlaying = currentBassNote;
+                }
+            }
+            else  // note-off (or note-on with velocity 0)
+            {
+                if (triggeredBassPlaying >= 0)
+                {
+                    if (sendBass)
+                        output.addEvent (juce::MidiMessage::noteOff (bassCh, triggeredBassPlaying), bassOff);
+                    bassSynthMidi.addEvent (juce::MidiMessage::noteOff (1, triggeredBassPlaying), bassOff);
+                    triggeredBassPlaying = -1;
+                }
+            }
+            continue;  // never pass trigger note to chord engine
+        }
 
         if (msg.isNoteOn())
         {
@@ -1035,8 +1086,9 @@ void FormaProcessor::triggerChord (int degree, juce::uint8 inputVelocity,
         bassNote = juce::jlimit (21, 72, bassNote + octaveBass * 12);
         currentBassNote = bassNote;
 
+        // In trigger mode, compute the pitch but let the MIDI trigger fire the bass.
         bool sendBass = (mode == OutputMode::All || mode == OutputMode::Bass);
-        if (sendBass)
+        if (sendBass && ! bassTriggerModeParam.load())
         {
             int bassCh = (mode == OutputMode::All) ? kBassChannel : 1;
             int bassOffset = juce::jmin (samplePosition, currentBlockSize - 1);
@@ -1165,6 +1217,7 @@ void FormaProcessor::releaseChord (juce::MidiBuffer& out, int samplePosition)
         bassSynthMidi.addEvent (juce::MidiMessage::noteOff (1, currentBassNote), samplePosition);
         currentBassNote = -1;
     }
+    triggeredBassPlaying = -1;
 
     // Stop arp
     arpeggiator.setActive (false);

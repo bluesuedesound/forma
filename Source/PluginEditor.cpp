@@ -278,6 +278,8 @@ void FormaEditor::syncUIFromProcessor()
     bassOn  = proc.bassEnabledParam.load();
     bassAlt = proc.bassAltParam.load();
     bassOct = proc.octaveBassParam.load();
+    bassTrig     = proc.bassTriggerModeParam.load();
+    bassTrigNote = juce::jlimit (0, 127, proc.bassTriggerNoteParam.load());
 
     // Arp
     arpOnState = proc.arpEnabled.load();
@@ -1173,7 +1175,7 @@ void FormaEditor::drawAdvanced (juce::Graphics& g)
     // BASS card
     {
         bool bassOpen = bassOn;
-        int cardH = bassOpen ? 70 : 30;
+        int cardH = bassOpen ? (bassTrig ? 96 : 70) : 30;
         auto cardR = juce::Rectangle<int> (px, py, 520, cardH);
         g.setColour (juce::Colour (0xFF1A1814));
         g.fillRoundedRectangle (cardR.toFloat(), 6.0f);
@@ -1197,6 +1199,62 @@ void FormaEditor::drawAdvanced (juce::Graphics& g)
             g.drawText ("ALT", juce::Rectangle<int> (px + 160, by, 28, 15), juce::Justification::centredLeft);
             advBassAltRect = juce::Rectangle<int> (px + 192, by, 26, 15);
             drawToggle (g, advBassAltRect, bassAlt);
+
+            // MIDI TRIGGER toggle on the same row, right half of the card
+            g.setColour (juce::Colour (0xFF7A7670));
+            g.drawText ("MIDI TRIGGER",
+                        juce::Rectangle<int> (px + 260, by, 100, 15),
+                        juce::Justification::centredLeft);
+            advBassTrigToggleRect = juce::Rectangle<int> (px + 360, by, 26, 15);
+            drawToggle (g, advBassTrigToggleRect, bassTrig);
+
+            if (bassTrig)
+            {
+                // TRIGGER NOTE stepper: - [C-2] +  with label
+                int ty = by + 26;
+                auto stepR = juce::Rectangle<int> (px + 12, ty, 220, 17);
+
+                g.setFont (mono (9.0f));
+                g.setColour (juce::Colour (0xFF7A7670));
+                g.drawText ("TRIGGER NOTE",
+                            stepR.withWidth (100),
+                            juce::Justification::centredLeft);
+
+                auto minR = juce::Rectangle<int> (stepR.getX() + 110, ty, 17, 17);
+                g.setColour (BG2);
+                g.fillRoundedRectangle (minR.toFloat(), 3.0f);
+                g.setColour (BORDER);
+                g.drawRoundedRectangle (minR.toFloat(), 3.0f, 1.0f);
+                g.setFont (mono (10.0f));
+                g.setColour (juce::Colour (0xFF7A7670));
+                g.drawText ("-", minR, juce::Justification::centred);
+                advBassTrigNoteMinRect = minR;
+
+                auto valR = juce::Rectangle<int> (stepR.getX() + 131, ty, 50, 17);
+                g.setColour (BG4);
+                g.fillRoundedRectangle (valR.toFloat(), 2.0f);
+                g.setColour (BORDER);
+                g.drawRoundedRectangle (valR.toFloat(), 2.0f, 1.0f);
+                g.setFont (mono (11.0f));
+                g.setColour (juce::Colour (0xFFB8B4AB));
+                // Ableton-style note name: C-2 = MIDI 0, C3 = MIDI 60
+                static const char* const pcs[] = {
+                    "C","C#","D","D#","E","F","F#","G","G#","A","A#","B"
+                };
+                int n = juce::jlimit (0, 127, bassTrigNote);
+                juce::String noteStr = juce::String (pcs[n % 12]) + juce::String ((n / 12) - 2);
+                g.drawText (noteStr, valR, juce::Justification::centred);
+
+                auto plR = juce::Rectangle<int> (stepR.getX() + 185, ty, 17, 17);
+                g.setColour (BG2);
+                g.fillRoundedRectangle (plR.toFloat(), 3.0f);
+                g.setColour (BORDER);
+                g.drawRoundedRectangle (plR.toFloat(), 3.0f, 1.0f);
+                g.setFont (mono (10.0f));
+                g.setColour (juce::Colour (0xFF7A7670));
+                g.drawText ("+", plR, juce::Justification::centred);
+                advBassTrigNotePlRect = plR;
+            }
         }
         py += cardH + 6;
     }
@@ -1504,6 +1562,31 @@ void FormaEditor::mouseDown (const juce::MouseEvent& e)
 
         if (advBassOctMinRect.contains (pos) && bassOct > -2) { bassOct--; proc.octaveBassParam.store (bassOct); repaint(); return; }
         if (advBassOctPlRect.contains (pos)  && bassOct < 2)  { bassOct++; proc.octaveBassParam.store (bassOct); repaint(); return; }
+
+        // Bass MIDI TRIGGER toggle
+        if (advBassTrigToggleRect.contains (pos))
+        {
+            bassTrig = !bassTrig;
+            proc.bassTriggerModeParam.store (bassTrig);
+            repaint();
+            return;
+        }
+
+        // Bass TRIGGER NOTE stepper
+        if (advBassTrigNoteMinRect.contains (pos) && bassTrigNote > 0)
+        {
+            bassTrigNote--;
+            proc.bassTriggerNoteParam.store (bassTrigNote);
+            repaint();
+            return;
+        }
+        if (advBassTrigNotePlRect.contains (pos) && bassTrigNote < 127)
+        {
+            bassTrigNote++;
+            proc.bassTriggerNoteParam.store (bassTrigNote);
+            repaint();
+            return;
+        }
 
         // Arp ON toggle
         if (advArpOnRect.contains (pos))

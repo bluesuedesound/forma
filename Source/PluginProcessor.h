@@ -83,6 +83,8 @@ public:
     std::atomic<int>   voicingParam     { 0 };
     std::atomic<bool>  bassEnabledParam { false };
     std::atomic<bool>  bassAltParam     { false };
+    std::atomic<bool>  bassTriggerModeParam { false };
+    std::atomic<int>   bassTriggerNoteParam { 0 };  // MIDI note; default 0 = C-2 (Ableton)
 
     // ── Arp parameters ──────────────────────────────────────────────────
     std::atomic<bool>  arpEnabled { false };
@@ -137,6 +139,7 @@ private:
     int currentDegree = -1;
     std::vector<int> currentChordNotes;
     int currentBassNote = -1;
+    int triggeredBassPlaying = -1;  // pitch of currently-sounding trigger-fired bass, or -1
     std::vector<int> prevChordNotes;
     int heldDegreeCounts[8] = {};
 

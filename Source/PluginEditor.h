@@ -161,6 +161,10 @@ private:
     int chordOctVal = 0;
     juce::Rectangle<int> advBassOnRect, advBassAltRect;
     juce::Rectangle<int> advBassOctMinRect, advBassOctPlRect;
+    juce::Rectangle<int> advBassTrigToggleRect;
+    juce::Rectangle<int> advBassTrigNoteMinRect, advBassTrigNotePlRect;
+    bool bassTrig = false;
+    int  bassTrigNote = 0;
     juce::Rectangle<int> advArpOnRect;
     juce::Rectangle<int> advMotifPills[6];
     juce::Rectangle<int> advRatePills[3];
