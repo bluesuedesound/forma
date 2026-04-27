@@ -18,6 +18,7 @@ public:
     void mouseDown (const juce::MouseEvent&) override;
     void mouseDrag (const juce::MouseEvent&) override;
     void mouseUp   (const juce::MouseEvent&) override;
+    bool keyPressed (const juce::KeyPress&) override;
 
 private:
     PresaProcessor& proc;
@@ -38,6 +39,14 @@ private:
     // ── SAMPLE-mode control panel ─────────────────────────────────────────
     juce::TextButton loopBtn    { "LOOP" };
     juce::TextButton reverseBtn { "REVERSE" };
+    juce::TextButton playBtn    { "PLAY" };
+
+    // True whenever we've asked the sample player to start. The pill also
+    // checks the processor for live voice state — this flag is the edge that
+    // flips us from PLAY → STOP without waiting for the next timer tick.
+    bool playButtonShowsStop = false;
+    void refreshPlayButton();
+    void togglePlayPause();
 
     juce::Rectangle<int> pitchDragRect;
     juce::Rectangle<int> speedDragRect;

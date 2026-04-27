@@ -83,6 +83,11 @@ target_compile_definitions(Presa PUBLIC
     JUCE_USE_CURL=0
     JUCE_VST3_CAN_REPLACE_VST2=0
     JUCE_DISPLAY_SPLASH_SCREEN=0
+    # Needed for the Standalone export flow: AlertWindow::runModalLoop() is
+    # only compiled in when modal loops are permitted. Safe here because the
+    # one call site is guarded by JucePlugin_Build_Standalone, so the VST3
+    # target never reaches it.
+    JUCE_MODAL_LOOPS_PERMITTED=1
 )
 
 # Codesign Standalone with entitlements — required for ScreenCaptureKit

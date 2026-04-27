@@ -33,9 +33,18 @@ public:
     // Returns the sample buffer for waveform display
     const juce::AudioBuffer<float>& getSampleBuffer() const { return sampleBuffer; }
 
-    // Trigger / release
-    void noteOn  (int padIndex, int midiNote, int rootNote);
+    // Trigger / release. startSampleOverride defaults to -1, which starts at
+    // the slice's natural edge (start in forward playback, end-1 in reverse).
+    // Passing a non-negative absolute sample index lets the caller drop the
+    // playhead anywhere inside the slice — used by the SAMPLE-mode waveform
+    // click-to-play so playback begins where the user clicked.
+    void noteOn  (int padIndex, int midiNote, int rootNote, int startSampleOverride = -1);
     void noteOff (int padIndex);
+
+    // True whenever any voice is still producing audio. Updated at the end of
+    // processBlock so the UI (PLAY/STOP pill) reflects reality even after a
+    // non-looping sample has naturally finished.
+    bool isAnyVoiceActive() const { return anyVoiceActive.load(); }
 
     // Render audio
     void processBlock (juce::AudioBuffer<float>& output, int numSamples);
@@ -106,6 +115,10 @@ private:
     std::atomic<float> speedMultiplier      { 1.0f };
     std::atomic<bool>  looping              { false };
     std::atomic<bool>  reversed             { false };
+
+    // Reflects whether any voice is still sounding. Written by processBlock,
+    // polled by the editor timer.
+    std::atomic<bool>  anyVoiceActive       { false };
 
     // Loop crossfade length in samples — enough to hide the seam without
     // audibly shortening short slices.

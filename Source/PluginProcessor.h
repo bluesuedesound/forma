@@ -3,7 +3,7 @@
 #include <juce_audio_utils/juce_audio_utils.h>
 #include "HarmonyEngine.h"
 #include "FormaSynth.h"
-#include "Arpeggiator.h"
+#include "BassEngine.h"
 #include "SuggestionEngine.h"
 
 struct FormaPreset {
@@ -14,16 +14,12 @@ struct FormaPreset {
     float feelAmount      = 0.0f;
     float xyDotX          = 0.5f;
     float xyDotY          = 0.5f;
-    bool  bassOn          = true;
-    bool  bassAlt         = false;
     int   bassOctave      = -1;
-    bool  arpEnabled      = false;
-    int   arpMotif        = 0;
-    float arpRate         = 1.0f;
-    float arpGate         = 0.8f;
-    int   arpSpread       = 1;
-    int   arpOctave       = 0;
-    int   outputMode      = 0;
+    int   bassMode        = 0;       // 0=Root,1=KickTrigger,2=KickVariation
+    int   bassTriggerNote = 0;       // MIDI note
+    float bassVariation   = 0.30f;
+    bool  chordsEnabled   = true;
+    bool  bassEnabled     = true;
     int   syncMode        = 2;
     float synthVolume     = 0.7f;
     bool  isEmpty         = true;
@@ -32,9 +28,6 @@ struct FormaPreset {
 class FormaProcessor : public juce::AudioProcessor
 {
 public:
-    enum class OutputMode { All = 0, Chords = 1, Bass = 2, Arp = 3 };
-    std::atomic<int> outputMode { 0 };
-
     enum class SoundPreset { Keys = 0, Felt, Glass, Tape, Ambient, Mallet };
     std::atomic<int> currentSoundPreset { 0 };
     void applySoundPreset (int preset);
@@ -81,24 +74,22 @@ public:
     std::atomic<int>   octaveChordParam { 0 };
     std::atomic<int>   octaveBassParam  { -1 };
     std::atomic<int>   voicingParam     { 0 };
-    std::atomic<bool>  bassEnabledParam { false };
-    std::atomic<bool>  bassAltParam     { false };
-    std::atomic<bool>  bassTriggerModeParam { false };
-    std::atomic<int>   bassTriggerNoteParam { 0 };  // MIDI note; default 0 = C-2 (Ableton)
 
-    // ── Arp parameters ──────────────────────────────────────────────────
-    std::atomic<bool>  arpEnabled { false };
-    std::atomic<float> arpRate    { 0.25f };
-    std::atomic<float> arpGateParam { 0.8f };
-    std::atomic<int>   arpSpread  { 1 };
-    std::atomic<int>   arpOctave  { 0 };
+    // ── Voice enable toggles (right column) ─────────────────────────────
+    std::atomic<bool>  chordsEnabled { true };
+    std::atomic<bool>  bassEnabled   { true };
+
+    // ── Bass mode parameters ────────────────────────────────────────────
+    // 0=Root, 1=KickTrigger, 2=KickVariation
+    std::atomic<int>   bassMode              { 0 };
+    std::atomic<int>   bassTriggerNoteParam  { 0 };  // MIDI note; default C-2 (Ableton)
+    std::atomic<float> bassVariationAmount   { 0.30f };
 
     void triggerChordFromEditor (int degree, juce::uint8 velocity = 80);
     void releaseChordFromEditor();
     void applyMoodDefaults (int moodIndex);
 
     std::atomic<int> activeDegree { -1 };
-    std::atomic<int> lastArpNote  { -1 };
     std::atomic<float> lastChordVelocity { 0.8f };
     juce::String currentChordName;
 
@@ -129,10 +120,11 @@ public:
     void savePreset (int slot, const juce::String& name);
     void loadPreset (int slot);
 
+    BassEngine  bassEngine;
+
 private:
     static constexpr int kChordChannel = 1;
     static constexpr int kBassChannel  = 2;
-    static constexpr int kArpChannel   = 3;
 
     static int pitchClassToDegree (int pitchClass);
 
@@ -145,22 +137,15 @@ private:
 
     int octaveChord = 0;
     int octaveBass  = -1;
-    bool bassEnabled = true;
-    bool bassAlt     = false;
 
     juce::Synthesiser chordSynth;
     juce::Synthesiser bassSynth;
-    juce::Synthesiser arpSynth;
     juce::MidiBuffer chordSynthMidi;
     juce::MidiBuffer bassSynthMidi;
-    juce::MidiBuffer arpSynthMidi;
 
     juce::MidiBuffer editorMidi;
     juce::SpinLock   editorMidiLock;
 
-public:
-    Arpeggiator arpeggiator;
-private:
     double currentSampleRate = 44100.0;
 
     // ── Feel/Drift: pending note queue ──────────────────────────────────
@@ -205,7 +190,10 @@ private:
     void resetHarmonicState();
 
     int currentBlockSize = 512;
-    int prevOutputMode = 0;
+    // Snapshot of chordsEnabled/bassEnabled from the previous processBlock,
+    // for detecting transitions and flushing stuck notes on voice-off.
+    bool prevChordsEnabled = true;
+    bool prevBassEnabled   = true;
 
     double lastKnownPpqPosition = 0.0;
     bool   transportWasPlaying  = false;

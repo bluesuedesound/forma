@@ -46,6 +46,12 @@ public:
     std::function<void ()> onPitchDragStart;
     std::function<void ()> onPitchDragEnd;
 
+    // Fires on mouseDown when the click lands on the waveform body (not a
+    // handle) while in SAMPLE mode. Carries the normalised [0..1] x-position
+    // of the click so playback can start from that point. Vertical dragging
+    // after the click still drives pitch as before.
+    std::function<void (float normalizedPosition)> onPlayFromPosition;
+
 private:
     void timerCallback() override;
 

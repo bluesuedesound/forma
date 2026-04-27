@@ -22,15 +22,12 @@ FormaProcessor::FormaProcessor()
     pendingNotes.reserve (32);
     recentDegrees.reserve (8);
 
-    // Initialize three synth engines
+    // Initialize two synth engines
     chordSynth.addSound (new FormaSound());
     for (int i = 0; i < 8; ++i) chordSynth.addVoice (new FormaVoice());
 
     bassSynth.addSound (new FormaSound());
     for (int i = 0; i < 2; ++i) bassSynth.addVoice (new FormaVoice());
-
-    arpSynth.addSound (new FormaSound());
-    for (int i = 0; i < 6; ++i) arpSynth.addVoice (new FormaVoice());
 
     // Apply default sound preset
     applySoundPreset (0);
@@ -47,11 +44,10 @@ FormaProcessor::FormaProcessor()
         auto& p = presets[0];
         p.name = "late night soul"; p.mood = "Deep"; p.keyRoot = 0;
         p.colorAmount = 0.75f; p.feelAmount = 0.5f;
-        p.xyDotX = 0.5f; p.xyDotY = 0.25f;  // dotY inverted: high color = low dotY
-        p.bassOn = true; p.bassAlt = true; p.bassOctave = -1;
-        p.arpEnabled = false; p.arpMotif = 0; p.arpRate = 1.0f;
-        p.arpGate = 0.8f; p.arpSpread = 1; p.arpOctave = 0;
-        p.outputMode = 0; p.syncMode = 2; p.synthVolume = 0.7f;
+        p.xyDotX = 0.5f; p.xyDotY = 0.25f;
+        p.bassOctave = -1; p.bassMode = 0; p.bassTriggerNote = 0; p.bassVariation = 0.30f;
+        p.chordsEnabled = true; p.bassEnabled = true;
+        p.syncMode = 2; p.synthVolume = 0.7f;
         p.isEmpty = false;
     }
     {
@@ -59,10 +55,9 @@ FormaProcessor::FormaProcessor()
         p.name = "golden hour"; p.mood = "Bright"; p.keyRoot = 7; // G
         p.colorAmount = 0.5f; p.feelAmount = 0.3f;
         p.xyDotX = 0.3f; p.xyDotY = 0.5f;
-        p.bassOn = true; p.bassAlt = false; p.bassOctave = -1;
-        p.arpEnabled = true; p.arpMotif = 0; p.arpRate = 1.0f;
-        p.arpGate = 0.7f; p.arpSpread = 1; p.arpOctave = 0;
-        p.outputMode = 0; p.syncMode = 2; p.synthVolume = 0.7f;
+        p.bassOctave = -1; p.bassMode = 0; p.bassTriggerNote = 0; p.bassVariation = 0.30f;
+        p.chordsEnabled = true; p.bassEnabled = true;
+        p.syncMode = 2; p.synthVolume = 0.7f;
         p.isEmpty = false;
     }
     {
@@ -70,10 +65,9 @@ FormaProcessor::FormaProcessor()
         p.name = "Dream Wash"; p.mood = "Dream"; p.keyRoot = 5; // F
         p.colorAmount = 0.7f; p.feelAmount = 0.6f;
         p.xyDotX = 0.6f; p.xyDotY = 0.3f;
-        p.bassOn = true; p.bassAlt = false; p.bassOctave = -1;
-        p.arpEnabled = true; p.arpMotif = 4; p.arpRate = 0.5f;
-        p.arpGate = 0.85f; p.arpSpread = 2; p.arpOctave = 0;
-        p.outputMode = 0; p.syncMode = 2; p.synthVolume = 0.7f;
+        p.bassOctave = -1; p.bassMode = 0; p.bassTriggerNote = 0; p.bassVariation = 0.30f;
+        p.chordsEnabled = true; p.bassEnabled = true;
+        p.syncMode = 2; p.synthVolume = 0.7f;
         p.isEmpty = false;
     }
     {
@@ -85,10 +79,9 @@ FormaProcessor::FormaProcessor()
         p.name = "soul dusk"; p.mood = "Dusk"; p.keyRoot = 0; // C
         p.colorAmount = 0.55f; p.feelAmount = 0.50f;
         p.xyDotX = 0.50f; p.xyDotY = 0.45f;
-        p.bassOn = true; p.bassAlt = false; p.bassOctave = -1;
-        p.arpEnabled = false; p.arpMotif = 0; p.arpRate = 1.0f;
-        p.arpGate = 0.8f; p.arpSpread = 1; p.arpOctave = 0;
-        p.outputMode = 0; p.syncMode = 2; p.synthVolume = 0.7f;
+        p.bassOctave = -1; p.bassMode = 0; p.bassTriggerNote = 0; p.bassVariation = 0.30f;
+        p.chordsEnabled = true; p.bassEnabled = true;
+        p.syncMode = 2; p.synthVolume = 0.7f;
         p.isEmpty = false;
     }
 }
@@ -97,16 +90,16 @@ void FormaProcessor::applySoundPreset (int preset)
 {
     using namespace FormaSynthPresets;
 
-    FormaVoiceParams chordP, bassP, arpP;
+    FormaVoiceParams chordP, bassP;
     switch (preset)
     {
-        case 0: chordP = Keys();  bassP = Sub();     arpP = Pluck();  break; // Keys
-        case 1: chordP = Felt();  bassP = Rubber();  arpP = Pluck();  break; // Felt
-        case 2: chordP = Glass(); bassP = Sub();     arpP = Bell();   break; // Glass
-        case 3: chordP = Tape();  bassP = Vintage(); arpP = Pluck();  break; // Tape
-        case 4: chordP = PadPreset(); bassP = Sub(); arpP = Bell();   break; // Ambient
-        case 5: chordP = Keys();  bassP = Sub();     arpP = Mallet(); break; // Mallet
-        default: chordP = Keys(); bassP = Sub();     arpP = Pluck();  break;
+        case 0: chordP = Keys();      bassP = Sub();     break; // Keys
+        case 1: chordP = Felt();      bassP = Rubber();  break; // Felt
+        case 2: chordP = Glass();     bassP = Sub();     break; // Glass
+        case 3: chordP = Tape();      bassP = Vintage(); break; // Tape
+        case 4: chordP = PadPreset(); bassP = Sub();     break; // Ambient
+        case 5: chordP = Keys();      bassP = Sub();     break; // Mallet
+        default: chordP = Keys();     bassP = Sub();     break;
     }
 
     for (int i = 0; i < chordSynth.getNumVoices(); ++i)
@@ -115,9 +108,6 @@ void FormaProcessor::applySoundPreset (int preset)
     for (int i = 0; i < bassSynth.getNumVoices(); ++i)
         if (auto* v = dynamic_cast<FormaVoice*> (bassSynth.getVoice (i)))
             v->params = bassP;
-    for (int i = 0; i < arpSynth.getNumVoices(); ++i)
-        if (auto* v = dynamic_cast<FormaVoice*> (arpSynth.getVoice (i)))
-            v->params = arpP;
 
     currentSoundPreset.store (preset);
 }
@@ -142,23 +132,15 @@ void FormaProcessor::getStateInformation (juce::MemoryBlock& destData)
     xml->setAttribute ("xyDotX", (double) xyDotX.load());
     xml->setAttribute ("xyDotY", (double) xyDotY.load());
 
-    // Bass
-    xml->setAttribute ("bassOn",  bassEnabledParam.load());
-    xml->setAttribute ("bassAlt", bassAltParam.load());
-    xml->setAttribute ("bassOct", octaveBassParam.load());
-    xml->setAttribute ("bassTrig",     bassTriggerModeParam.load());
-    xml->setAttribute ("bassTrigNote", bassTriggerNoteParam.load());
+    // Voice enable toggles + bass controls
+    xml->setAttribute ("chordsEnabled",   chordsEnabled.load());
+    xml->setAttribute ("bassEnabled",     bassEnabled.load());
+    xml->setAttribute ("bassOct",         octaveBassParam.load());
+    xml->setAttribute ("bassMode",        bassMode.load());
+    xml->setAttribute ("bassTrigNote",    bassTriggerNoteParam.load());
+    xml->setAttribute ("bassVariation",   (double) bassVariationAmount.load());
 
-    // Arp
-    xml->setAttribute ("arpEnabled", arpEnabled.load());
-    xml->setAttribute ("arpMotif",   (int) arpeggiator.getPattern());
-    xml->setAttribute ("arpRate",    (double) arpeggiator.getRate());
-    xml->setAttribute ("arpGate",    (double) arpeggiator.getGate());
-    xml->setAttribute ("arpSpread",  arpeggiator.getSpread());
-    xml->setAttribute ("arpOctave",  arpeggiator.getOctaveOffset());
-
-    // Output/Sync
-    xml->setAttribute ("outputMode", outputMode.load());
+    // Sync
     xml->setAttribute ("syncMode",   syncMode.load());
 
     // Synth
@@ -185,18 +167,14 @@ void FormaProcessor::getStateInformation (juce::MemoryBlock& destData)
             pe->setAttribute ("feel",    (double) presets[i].feelAmount);
             pe->setAttribute ("dotX",    (double) presets[i].xyDotX);
             pe->setAttribute ("dotY",    (double) presets[i].xyDotY);
-            pe->setAttribute ("bassOn",  presets[i].bassOn);
-            pe->setAttribute ("bassAlt", presets[i].bassAlt);
-            pe->setAttribute ("bassOct", presets[i].bassOctave);
-            pe->setAttribute ("arpOn",   presets[i].arpEnabled);
-            pe->setAttribute ("motif",   presets[i].arpMotif);
-            pe->setAttribute ("rate",    (double) presets[i].arpRate);
-            pe->setAttribute ("gate",    (double) presets[i].arpGate);
-            pe->setAttribute ("spread",  presets[i].arpSpread);
-            pe->setAttribute ("arpOct",  presets[i].arpOctave);
-            pe->setAttribute ("outMode", presets[i].outputMode);
-            pe->setAttribute ("sync",    presets[i].syncMode);
-            pe->setAttribute ("synth",   (double) presets[i].synthVolume);
+            pe->setAttribute ("bassOct",  presets[i].bassOctave);
+            pe->setAttribute ("bassMode", presets[i].bassMode);
+            pe->setAttribute ("bassTrigNote", presets[i].bassTriggerNote);
+            pe->setAttribute ("bassVar",  (double) presets[i].bassVariation);
+            pe->setAttribute ("chordsOn", presets[i].chordsEnabled);
+            pe->setAttribute ("bassOn",   presets[i].bassEnabled);
+            pe->setAttribute ("sync",     presets[i].syncMode);
+            pe->setAttribute ("synth",    (double) presets[i].synthVolume);
         }
     }
     xml->setAttribute ("currentPreset", currentPresetIndex);
@@ -223,29 +201,21 @@ void FormaProcessor::setStateInformation (const void* data, int sizeInBytes)
     xyDotX.store ((float) xml->getDoubleAttribute ("xyDotX", 0.5));
     xyDotY.store ((float) xml->getDoubleAttribute ("xyDotY", 0.5));
 
-    // Bass
-    bassEnabledParam.store (xml->getBoolAttribute ("bassOn", true));
-    bassAltParam.store     (xml->getBoolAttribute ("bassAlt", false));
+    // Voice enable toggles. Old sessions may not have these — default both
+    // on so reopening an old file is sensible (both voices audible).
+    chordsEnabled.store (xml->getBoolAttribute ("chordsEnabled", true));
+    bassEnabled.store   (xml->getBoolAttribute ("bassEnabled",   true));
+
+    // Bass controls
     octaveBassParam.store  (xml->getIntAttribute  ("bassOct", -1));
-    bassTriggerModeParam.store (xml->getBoolAttribute ("bassTrig", false));
+    bassMode.store (juce::jlimit (0, 2, xml->getIntAttribute ("bassMode", 0)));
     bassTriggerNoteParam.store (juce::jlimit (0, 127,
         xml->getIntAttribute ("bassTrigNote", 0)));
+    bassVariationAmount.store ((float) juce::jlimit (0.0,  1.0,
+        xml->getDoubleAttribute ("bassVariation", 0.30)));
 
-    // Arp
-    arpEnabled.store (xml->getBoolAttribute ("arpEnabled", false));
-    arpeggiator.setPattern ((Arpeggiator::Pattern) xml->getIntAttribute ("arpMotif", 0));
-    arpeggiator.setRate    ((float) xml->getDoubleAttribute ("arpRate", 1.0));
-    arpeggiator.setGate    ((float) xml->getDoubleAttribute ("arpGate", 0.8));
-    arpeggiator.setSpread  (xml->getIntAttribute ("arpSpread", 1));
-    arpeggiator.setOctaveOffset (xml->getIntAttribute ("arpOctave", 0));
-    arpRate.store      ((float) xml->getDoubleAttribute ("arpRate", 1.0));
-    arpGateParam.store ((float) xml->getDoubleAttribute ("arpGate", 0.8));
-    arpSpread.store    (xml->getIntAttribute ("arpSpread", 1));
-    arpOctave.store    (xml->getIntAttribute ("arpOctave", 0));
-
-    // Output/Sync
-    outputMode.store (xml->getIntAttribute ("outputMode", 0));
-    syncMode.store   (xml->getIntAttribute ("syncMode", 2));
+    // Sync
+    syncMode.store (xml->getIntAttribute ("syncMode", 2));
 
     // Synth
     synthVolume.store ((float) xml->getDoubleAttribute ("synthVol", 0.7));
@@ -274,18 +244,17 @@ void FormaProcessor::setStateInformation (const void* data, int sizeInBytes)
             presets[slot].feelAmount  = (float) pe->getDoubleAttribute ("feel");
             presets[slot].xyDotX      = (float) pe->getDoubleAttribute ("dotX");
             presets[slot].xyDotY      = (float) pe->getDoubleAttribute ("dotY");
-            presets[slot].bassOn      = pe->getBoolAttribute ("bassOn");
-            presets[slot].bassAlt     = pe->getBoolAttribute ("bassAlt");
-            presets[slot].bassOctave  = pe->getIntAttribute ("bassOct");
-            presets[slot].arpEnabled  = pe->getBoolAttribute ("arpOn");
-            presets[slot].arpMotif    = pe->getIntAttribute ("motif");
-            presets[slot].arpRate     = (float) pe->getDoubleAttribute ("rate");
-            presets[slot].arpGate     = (float) pe->getDoubleAttribute ("gate");
-            presets[slot].arpSpread   = pe->getIntAttribute ("spread");
-            presets[slot].arpOctave   = pe->getIntAttribute ("arpOct");
-            presets[slot].outputMode  = pe->getIntAttribute ("outMode");
-            presets[slot].syncMode    = pe->getIntAttribute ("sync");
-            presets[slot].synthVolume = (float) pe->getDoubleAttribute ("synth");
+            presets[slot].bassOctave       = pe->getIntAttribute ("bassOct", -1);
+            presets[slot].bassMode         = juce::jlimit (0, 2,
+                                                pe->getIntAttribute ("bassMode", 0));
+            presets[slot].bassTriggerNote  = juce::jlimit (0, 127,
+                                                pe->getIntAttribute ("bassTrigNote", 0));
+            presets[slot].bassVariation    = (float) juce::jlimit (0.0, 1.0,
+                                                pe->getDoubleAttribute ("bassVar", 0.30));
+            presets[slot].chordsEnabled    = pe->getBoolAttribute ("chordsOn", true);
+            presets[slot].bassEnabled      = pe->getBoolAttribute ("bassOn",   true);
+            presets[slot].syncMode         = pe->getIntAttribute ("sync", 2);
+            presets[slot].synthVolume      = (float) pe->getDoubleAttribute ("synth", 0.7);
         }
     }
     currentPresetIndex = xml->getIntAttribute ("currentPreset", -1);
@@ -303,26 +272,22 @@ void FormaProcessor::savePreset (int slot, const juce::String& name)
 {
     if (slot < 0 || slot >= NUM_PRESETS) return;
     auto& p = presets[slot];
-    p.name        = name;
-    p.mood        = harmonyEngine.getCurrentMood();
-    p.keyRoot     = harmonyEngine.getRootMidi() - 48;
-    p.colorAmount = colorAmount.load();
-    p.feelAmount  = feelAmount.load();
-    p.xyDotX      = xyDotX.load();
-    p.xyDotY      = xyDotY.load();
-    p.bassOn      = bassEnabledParam.load();
-    p.bassAlt     = bassAltParam.load();
-    p.bassOctave  = octaveBassParam.load();
-    p.arpEnabled  = arpEnabled.load();
-    p.arpMotif    = (int) arpeggiator.getPattern();
-    p.arpRate     = arpeggiator.getRate();
-    p.arpGate     = arpeggiator.getGate();
-    p.arpSpread   = arpeggiator.getSpread();
-    p.arpOctave   = arpeggiator.getOctaveOffset();
-    p.outputMode  = outputMode.load();
-    p.syncMode    = syncMode.load();
-    p.synthVolume = synthVolume.load();
-    p.isEmpty     = false;
+    p.name            = name;
+    p.mood            = harmonyEngine.getCurrentMood();
+    p.keyRoot         = harmonyEngine.getRootMidi() - 48;
+    p.colorAmount     = colorAmount.load();
+    p.feelAmount      = feelAmount.load();
+    p.xyDotX          = xyDotX.load();
+    p.xyDotY          = xyDotY.load();
+    p.bassOctave      = octaveBassParam.load();
+    p.bassMode        = bassMode.load();
+    p.bassTriggerNote = bassTriggerNoteParam.load();
+    p.bassVariation   = bassVariationAmount.load();
+    p.chordsEnabled   = chordsEnabled.load();
+    p.bassEnabled     = bassEnabled.load();
+    p.syncMode        = syncMode.load();
+    p.synthVolume     = synthVolume.load();
+    p.isEmpty         = false;
     currentPresetIndex = slot;
 }
 
@@ -332,7 +297,6 @@ void FormaProcessor::loadPreset (int slot)
     auto& p = presets[slot];
     if (p.isEmpty) return;
 
-    // Release any active notes before changing state
     resetPlayingState();
 
     harmonyEngine.setMood (p.mood);
@@ -342,20 +306,12 @@ void FormaProcessor::loadPreset (int slot)
     harmonyEngine.setColorAmount (p.colorAmount);
     xyDotX.store (p.xyDotX);
     xyDotY.store (p.xyDotY);
-    bassEnabledParam.store (p.bassOn);
-    bassAltParam.store (p.bassAlt);
     octaveBassParam.store (p.bassOctave);
-    arpEnabled.store (p.arpEnabled);
-    arpeggiator.setPattern ((Arpeggiator::Pattern) p.arpMotif);
-    arpeggiator.setRate (p.arpRate);
-    arpeggiator.setGate (p.arpGate);
-    arpeggiator.setSpread (p.arpSpread);
-    arpeggiator.setOctaveOffset (p.arpOctave);
-    arpRate.store (p.arpRate);
-    arpGateParam.store (p.arpGate);
-    arpSpread.store (p.arpSpread);
-    arpOctave.store (p.arpOctave);
-    outputMode.store (p.outputMode);
+    bassMode.store (juce::jlimit (0, 2, p.bassMode));
+    bassTriggerNoteParam.store (juce::jlimit (0, 127, p.bassTriggerNote));
+    bassVariationAmount.store (juce::jlimit (0.0f, 1.0f, p.bassVariation));
+    chordsEnabled.store (p.chordsEnabled);
+    bassEnabled.store   (p.bassEnabled);
     syncMode.store (p.syncMode);
     synthVolume.store (p.synthVolume);
     driftAmount.store (getDriftForMoodAndFeel (p.feelAmount));
@@ -370,38 +326,25 @@ void FormaProcessor::loadPreset (int slot)
 // ── Mood defaults ──────────────────────────────────────────────────────────
 
 struct MoodDef {
-    Arpeggiator::Pattern pattern;
-    float rate, gate, feel, drift, color;
-    int spread, voicing;
-    bool bassAlt;
+    float feel, drift, color;
+    int voicing;
 };
 
 static const MoodDef kMoodDefs[] = {
-    // Bright:  Rise,    rate 1x,   gate 0.70
-    { Arpeggiator::Pattern::Rise,    1.0f,  0.70f, 0.30f, 0.15f, 0.50f, 1,  0, false },
-    // Warm:    Groove,  rate 1x,   gate 0.75
-    { Arpeggiator::Pattern::Groove,  1.0f,  0.75f, 0.40f, 0.35f, 0.60f, 1, -1, true  },
-    // Dream:   Spiral,  rate 0.5x, gate 0.85
-    { Arpeggiator::Pattern::Spiral,  0.5f,  0.85f, 0.60f, 0.25f, 0.70f, 2,  3, false },
-    // Deep:    Pulse,   rate 1x,   gate 0.70
-    { Arpeggiator::Pattern::Pulse,   1.0f,  0.70f, 0.50f, 0.45f, 0.75f, 1, -1, true  },
-    // Hollow:  Cascade, rate 0.5x, gate 0.90
-    { Arpeggiator::Pattern::Cascade, 0.5f,  0.90f, 0.15f, 0.10f, 0.40f, 1,  1, false },
-    // Tender:  Pulse,   rate 0.5x, gate 0.85
-    { Arpeggiator::Pattern::Pulse,   0.5f,  0.85f, 0.60f, 0.35f, 0.70f, 1,  1, false },
-    // Tense:   Cascade, rate 2x,   gate 0.65
-    { Arpeggiator::Pattern::Cascade, 2.0f,  0.65f, 0.35f, 0.20f, 0.55f, 1, -2, true  },
-    // Dusk:    Groove,  rate 1x,   gate 0.75
-    { Arpeggiator::Pattern::Groove,  1.0f,  0.75f, 0.50f, 0.40f, 0.55f, 1,  0, false },
+    // feel, drift, color, voicing
+    { 0.30f, 0.15f, 0.50f,  0 },  // Bright
+    { 0.40f, 0.35f, 0.60f, -1 },  // Warm
+    { 0.60f, 0.25f, 0.70f,  3 },  // Dream
+    { 0.50f, 0.45f, 0.75f, -1 },  // Deep
+    { 0.15f, 0.10f, 0.40f,  1 },  // Hollow
+    { 0.60f, 0.35f, 0.70f,  1 },  // Tender
+    { 0.35f, 0.20f, 0.55f, -2 },  // Tense
+    { 0.50f, 0.40f, 0.55f,  0 },  // Dusk
     // ── Bright Lights pack ──
-    // Crest:   Rise,    rate 1x,   gate 0.70 — clean pop
-    { Arpeggiator::Pattern::Rise,    1.0f,  0.70f, 0.25f, 0.10f, 0.45f, 1,  0, false },
-    // Nocturne: Pulse,  rate 0.5x, gate 0.80 — dark minor
-    { Arpeggiator::Pattern::Pulse,   0.5f,  0.80f, 0.40f, 0.30f, 0.35f, 1, -1, false },
-    // Shimmer: Spiral,  rate 1x,   gate 0.75 — synth
-    { Arpeggiator::Pattern::Spiral,  1.0f,  0.75f, 0.35f, 0.20f, 0.50f, 1,  1, false },
-    // Static:  Cascade, rate 2x,   gate 0.65 — hyperpop
-    { Arpeggiator::Pattern::Cascade, 2.0f,  0.65f, 0.20f, 0.15f, 0.50f, 1,  0, false },
+    { 0.25f, 0.10f, 0.45f,  0 },  // Crest
+    { 0.40f, 0.30f, 0.35f, -1 },  // Nocturne
+    { 0.35f, 0.20f, 0.50f,  1 },  // Shimmer
+    { 0.20f, 0.15f, 0.50f,  0 },  // Static
 };
 
 void FormaProcessor::applyMoodDefaults (int moodIndex)
@@ -409,18 +352,12 @@ void FormaProcessor::applyMoodDefaults (int moodIndex)
     if (moodIndex < 0 || moodIndex >= 12) return;
     const auto& d = kMoodDefs[moodIndex];
 
-    arpeggiator.setPattern (d.pattern);
-    arpRate.store (d.rate);
-    arpGateParam.store (d.gate);
-    arpSpread.store (d.spread);
-
     feelAmount.store (d.feel);
     driftAmount.store (d.drift);
     colorAmount.store (d.color);
     harmonyEngine.setColorAmount (d.color);
 
     voicingParam.store (d.voicing);
-    bassAltParam.store (d.bassAlt);
 
     // Reset voice leading so first chord in new mood is fresh
     harmonyEngine.resetVoiceLeadingState();
@@ -448,16 +385,16 @@ void FormaProcessor::prepareToPlay (double sampleRate, int)
     resetPlayingState();
     currentSampleRate = sampleRate;
 
+    bassEngine.prepareToPlay (sampleRate);
+    bassEngine.setMode (bassMode.load());
+
     chordSynth.setCurrentPlaybackSampleRate (sampleRate);
     bassSynth.setCurrentPlaybackSampleRate (sampleRate);
-    arpSynth.setCurrentPlaybackSampleRate (sampleRate);
 
     for (int i = 0; i < chordSynth.getNumVoices(); ++i)
         static_cast<FormaVoice*> (chordSynth.getVoice (i))->prepareToPlay (sampleRate, 0);
     for (int i = 0; i < bassSynth.getNumVoices(); ++i)
         static_cast<FormaVoice*> (bassSynth.getVoice (i))->prepareToPlay (sampleRate, 0);
-    for (int i = 0; i < arpSynth.getNumVoices(); ++i)
-        static_cast<FormaVoice*> (arpSynth.getVoice (i))->prepareToPlay (sampleRate, 0);
 }
 
 void FormaProcessor::releaseResources()
@@ -472,12 +409,10 @@ void FormaProcessor::resetPlayingState()
         const juce::SpinLock::ScopedLockType lock (editorMidiLock);
         editorMidi.addEvent (juce::MidiMessage::allNotesOff (kChordChannel), 0);
         editorMidi.addEvent (juce::MidiMessage::allNotesOff (kBassChannel), 0);
-        editorMidi.addEvent (juce::MidiMessage::allNotesOff (kArpChannel), 0);
-        // Also send note-offs for all known active notes
         for (int note : currentChordNotes)
         {
             editorMidi.addEvent (juce::MidiMessage::noteOff (kChordChannel, note), 0);
-            editorMidi.addEvent (juce::MidiMessage::noteOff (1, note), 0);  // synth channel
+            editorMidi.addEvent (juce::MidiMessage::noteOff (1, note), 0);
         }
         if (currentBassNote >= 0)
         {
@@ -487,8 +422,7 @@ void FormaProcessor::resetPlayingState()
     }
 
     pendingNotes.clear();
-    arpeggiator.setActive (false);
-    arpeggiator.reset();
+    bassEngine.releaseChord();
     currentChordNotes.clear();
     currentBassNote = -1;
     triggeredBassPlaying = -1;
@@ -497,7 +431,6 @@ void FormaProcessor::resetPlayingState()
     std::memset (heldDegreeCounts, 0, sizeof (heldDegreeCounts));
     chordSynth.allNotesOff (0, true);
     bassSynth.allNotesOff (0, true);
-    arpSynth.allNotesOff (0, true);
     resetHarmonicState();
 }
 
@@ -541,19 +474,13 @@ void FormaProcessor::processBlock (juce::AudioBuffer<float>& buffer,
 
     octaveChord = octaveChordParam.load();
     octaveBass  = octaveBassParam.load();
-    bassEnabled = bassEnabledParam.load();
-    bassAlt     = bassAltParam.load();
     harmonyEngine.setColorAmount (colorAmount.load());
     harmonyEngine.setVoicing (voicingParam.load());
 
-    // Sync arp params (don't touch active state here — controlled by
-    // triggerChord/releaseChord based on whether a chord is held)
-    arpeggiator.setRate (arpRate.load());
-    arpeggiator.setGate (arpGateParam.load());
-    arpeggiator.setSpread (arpSpread.load());
-    arpeggiator.setOctaveOffset (arpOctave.load() * 12);
-    arpeggiator.setFeelAmount (feelAmount.load());
-    arpeggiator.setDriftAmount (driftAmount.load());
+    // Push bass params each block.
+    bassEngine.setMode (bassMode.load());
+    bassEngine.setOctaveOffset (octaveBassParam.load());
+    bassEngine.setVariationAmount (bassVariationAmount.load());
 
     // Compute anchor threshold from BPM
     {
@@ -610,20 +537,27 @@ void FormaProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         }
     }
 
-    // Detect output mode change — send all-notes-off on all channels to prevent stuck notes
-    int curMode = outputMode.load();
-    if (curMode != prevOutputMode)
+    // Detect voice-toggle transitions — flush stuck notes on the affected
+    // synth/channel when a voice is switched off.
+    const bool curChords = chordsEnabled.load();
+    const bool curBass   = bassEnabled.load();
+    if (curChords != prevChordsEnabled || curBass != prevBassEnabled)
     {
-        midiMessages.addEvent (juce::MidiMessage::allNotesOff (kChordChannel), 0);
-        midiMessages.addEvent (juce::MidiMessage::allNotesOff (kBassChannel), 0);
-        midiMessages.addEvent (juce::MidiMessage::allNotesOff (kArpChannel), 0);
-        chordSynthMidi.addEvent (juce::MidiMessage::allNotesOff (1), 0);
-        bassSynthMidi.addEvent (juce::MidiMessage::allNotesOff (1), 0);
-        arpSynthMidi.addEvent (juce::MidiMessage::allNotesOff (1), 0);
-        chordSynth.allNotesOff (0, false);
-        bassSynth.allNotesOff (0, false);
-        arpSynth.allNotesOff (0, false);
-        prevOutputMode = curMode;
+        if (! curChords && prevChordsEnabled)
+        {
+            midiMessages.addEvent (juce::MidiMessage::allNotesOff (kChordChannel), 0);
+            chordSynthMidi.addEvent (juce::MidiMessage::allNotesOff (1), 0);
+            chordSynth.allNotesOff (0, false);
+        }
+        if (! curBass && prevBassEnabled)
+        {
+            midiMessages.addEvent (juce::MidiMessage::allNotesOff (kBassChannel), 0);
+            bassSynthMidi.addEvent (juce::MidiMessage::allNotesOff (1), 0);
+            bassSynth.allNotesOff (0, false);
+            triggeredBassPlaying = -1;
+        }
+        prevChordsEnabled = curChords;
+        prevBassEnabled   = curBass;
     }
 
     {
@@ -636,27 +570,6 @@ void FormaProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     juce::MidiBuffer output;
     chordSynthMidi.clear();
     bassSynthMidi.clear();
-    arpSynthMidi.clear();
-
-    // Kill arp if toggle was turned off
-    if (! arpEnabled.load() && arpeggiator.isActive())
-    {
-        auto mode = static_cast<OutputMode> (outputMode.load());
-        int arpOff = arpeggiator.flushPendingOff();
-        arpeggiator.setActive (false);
-        arpeggiator.reset();
-        if (arpOff >= 0)
-        {
-            bool sendArp = (mode == OutputMode::All || mode == OutputMode::Arp);
-            if (sendArp)
-            {
-                int ch = (mode == OutputMode::All) ? kArpChannel : 1;
-                output.addEvent (juce::MidiMessage::noteOff (ch, arpOff), 0);
-                if (mode == OutputMode::Arp)
-                    arpSynthMidi.addEvent (juce::MidiMessage::noteOff (1, arpOff), 0);
-            }
-        }
-    }
 
     processPendingNotes (output, currentBlockSize);
 
@@ -664,8 +577,11 @@ void FormaProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     if (pendingNotes.size() > 32)
         pendingNotes.clear();
 
-    const bool triggerMode = bassTriggerModeParam.load();
-    const int  triggerNote = bassTriggerNoteParam.load();
+    // MIDI trigger only active when bass mode uses it (KickTrigger or
+    // KickVariation). Root mode ignores trigger notes.
+    const int  bassModeCached = bassMode.load();
+    const bool triggerMode    = (bassModeCached >= 1);
+    const int  triggerNote    = bassTriggerNoteParam.load();
 
     for (const auto metadata : midiMessages)
     {
@@ -676,10 +592,9 @@ void FormaProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         if (triggerMode && (msg.isNoteOn() || msg.isNoteOff())
             && msg.getNoteNumber() == triggerNote)
         {
-            auto outMode = static_cast<OutputMode> (outputMode.load());
-            bool sendBass = (outMode == OutputMode::All || outMode == OutputMode::Bass);
-            int  bassCh   = (outMode == OutputMode::All) ? kBassChannel : 1;
-            int  bassOff  = juce::jmin (pos, currentBlockSize - 1);
+            const bool sendBass = curBass;
+            const int  bassCh   = kBassChannel;
+            const int  bassOff  = juce::jmin (pos, currentBlockSize - 1);
 
             if (msg.isNoteOn() && msg.getVelocity() > 0)
             {
@@ -687,18 +602,34 @@ void FormaProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                 if (triggeredBassPlaying >= 0)
                 {
                     if (sendBass)
+                    {
                         output.addEvent (juce::MidiMessage::noteOff (bassCh, triggeredBassPlaying), bassOff);
-                    bassSynthMidi.addEvent (juce::MidiMessage::noteOff (1, triggeredBassPlaying), bassOff);
+                        bassSynthMidi.addEvent (juce::MidiMessage::noteOff (1, triggeredBassPlaying), bassOff);
+                    }
                     triggeredBassPlaying = -1;
                 }
-                // Fire bass only if a chord has been pressed (valid bass pitch)
-                if (currentBassNote >= 0)
+                if (bassEngine.isChordActive())
                 {
-                    juce::uint8 vel = msg.getVelocity();
-                    if (sendBass)
-                        output.addEvent (juce::MidiMessage::noteOn (bassCh, currentBassNote, vel), bassOff);
-                    bassSynthMidi.addEvent (juce::MidiMessage::noteOn (1, currentBassNote, vel), bassOff);
-                    triggeredBassPlaying = currentBassNote;
+                    // Kick+Variation needs beat position; Kick Trigger just plays root.
+                    double beatPos = -1.0;
+                    if (auto* ph = getPlayHead())
+                    {
+                        auto posInfo = ph->getPosition();
+                        if (posInfo.hasValue())
+                            if (auto ppq = posInfo->getPpqPosition())
+                                beatPos = *ppq;
+                    }
+                    int note = bassEngine.chooseTriggerNote (beatPos, rng);
+                    if (note >= 0)
+                    {
+                        juce::uint8 vel = msg.getVelocity();
+                        if (sendBass)
+                        {
+                            output.addEvent (juce::MidiMessage::noteOn (bassCh, note, vel), bassOff);
+                            bassSynthMidi.addEvent (juce::MidiMessage::noteOn (1, note, vel), bassOff);
+                        }
+                        triggeredBassPlaying = note;
+                    }
                 }
             }
             else  // note-off (or note-on with velocity 0)
@@ -706,12 +637,14 @@ void FormaProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                 if (triggeredBassPlaying >= 0)
                 {
                     if (sendBass)
+                    {
                         output.addEvent (juce::MidiMessage::noteOff (bassCh, triggeredBassPlaying), bassOff);
-                    bassSynthMidi.addEvent (juce::MidiMessage::noteOff (1, triggeredBassPlaying), bassOff);
+                        bassSynthMidi.addEvent (juce::MidiMessage::noteOff (1, triggeredBassPlaying), bassOff);
+                    }
                     triggeredBassPlaying = -1;
                 }
             }
-            continue;  // never pass trigger note to chord engine
+            continue;
         }
 
         if (msg.isNoteOn())
@@ -765,43 +698,9 @@ void FormaProcessor::processBlock (juce::AudioBuffer<float>& buffer,
             output.addEvent (msg, pos);
     }
 
-    // ── Arpeggiator ──
-    auto mode = static_cast<OutputMode> (outputMode.load());
-    bool sendArp = (mode == OutputMode::All || mode == OutputMode::Arp);
-
-    if (sendArp && arpeggiator.isActive())
-    {
-        double bpm = 120.0;
-        if (auto* ph = getPlayHead())
-        {
-            auto posInfo = ph->getPosition();
-            if (posInfo.hasValue())
-                if (auto b = posInfo->getBpm()) bpm = *b;
-        }
-
-        int ch = (mode == OutputMode::All) ? kArpChannel : 1;
-        auto events = arpeggiator.process (currentBlockSize, bpm, currentSampleRate);
-
-        for (auto& e : events)
-        {
-            if (e.isNoteOn)
-            {
-                output.addEvent (juce::MidiMessage::noteOn (ch, e.note, (juce::uint8) e.velocity), e.sampleOffset);
-                arpSynthMidi.addEvent (juce::MidiMessage::noteOn (1, e.note, (juce::uint8) e.velocity), e.sampleOffset);
-                lastArpNote.store (e.note);
-            }
-            else
-            {
-                output.addEvent (juce::MidiMessage::noteOff (ch, e.note), e.sampleOffset);
-                arpSynthMidi.addEvent (juce::MidiMessage::noteOff (1, e.note), e.sampleOffset);
-            }
-        }
-    }
-
-    // Render three synth engines — they sum into the buffer
+    // Render two synth engines — they sum into the buffer.
     chordSynth.renderNextBlock (buffer, chordSynthMidi, 0, currentBlockSize);
     bassSynth.renderNextBlock  (buffer, bassSynthMidi,  0, currentBlockSize);
-    arpSynth.renderNextBlock   (buffer, arpSynthMidi,   0, currentBlockSize);
 
     // Master gain + soft clipper
     float masterGain = synthVolume.load();
@@ -960,7 +859,8 @@ void FormaProcessor::triggerChord (int degree, juce::uint8 inputVelocity,
 {
     releaseChord (out, samplePosition);
 
-    auto mode = static_cast<OutputMode> (outputMode.load());
+    const bool sendChords_ = chordsEnabled.load();
+    const bool sendBass_   = bassEnabled.load();
     float feel  = feelAmount.load();
     float drift = driftAmount.load();
 
@@ -975,24 +875,42 @@ void FormaProcessor::triggerChord (int degree, juce::uint8 inputVelocity,
     }
 #endif
 
-    // Voice leading: melodic nearest-note
+    // Voice leading: melodic nearest-note. Runs on every chord press that
+    // has a predecessor — there is no feel-based gate any more. feel still
+    // tempers the register-gravity term inside getBestInversion.
     harmonyEngine.setFeelAmount (feel);
 
     std::vector<int> voiced;
-    if (feel < 0.15f || prevChordNotes.empty())
+    if (prevChordNotes.empty())
     {
-        // Below feel threshold or first chord: root position near mood register
+        // First chord: anchor at mood register.
         voiced = harmonyEngine.placeNearRegister (rawChord,
                      harmonyEngine.getTargetRegisterCenter());
+#if JUCE_DEBUG
+        DBG ("voicing: first chord, placeNearRegister");
+#endif
     }
     else
     {
         voiced = harmonyEngine.getBestInversion (rawChord, prevChordNotes, feel, degree);
+#if JUCE_DEBUG
+        DBG ("voicing: getBestInversion (feel=" + juce::String (feel, 2)
+             + ", degree=" + juce::String (degree) + ")");
+#endif
     }
+
+#if JUCE_DEBUG
+    {
+        juce::String vs;
+        for (int n : voiced) vs += juce::String (n) + " ";
+        DBG ("  -> voiced=[" + vs.trimEnd() + "]");
+    }
+#endif
 
     // Store full 4-voice result for voice leading context
     for (auto& n : voiced) n = juce::jlimit (21, 108, n);
     prevChordNotes = voiced;  // always 4 voices for voice leading
+    harmonyEngine.commitVoicingToCache (degree, prevChordNotes);
 
     // Apply voicing mode (reduces voices for output)
     auto vm = static_cast<VoicingMode> (voicingMode.load());
@@ -1046,8 +964,8 @@ void FormaProcessor::triggerChord (int degree, juce::uint8 inputVelocity,
     int driftSamples = (int)(chordDriftMs * samplesPerMs);
 
     // Schedule chord notes with strum
-    bool sendChords = (mode == OutputMode::All || mode == OutputMode::Chords);
-    int chordCh = (mode == OutputMode::All) ? kChordChannel : 1;
+    const bool sendChords = sendChords_;
+    const int  chordCh    = kChordChannel;
     int currentOffset = samplePosition + driftSamples;
 
     for (int i = 0; i < n; ++i)
@@ -1074,8 +992,9 @@ void FormaProcessor::triggerChord (int degree, juce::uint8 inputVelocity,
         }
     }
 
-    // Bass — simple toggle: root note one octave below chord
-    if (bassEnabled)
+    // Bass — always update chord state (currentBassNote + BassEngine chord
+    // context) so non-Chords tabs can generate audio. Only the chord voice's
+    // noteOn emission is gated by chordsEnabled above with sendChords.
     {
         int rootPc = rawChord[0] % 12;
         int lowestVoice = currentChordNotes.empty() ? 48 : currentChordNotes.front();
@@ -1086,24 +1005,24 @@ void FormaProcessor::triggerChord (int degree, juce::uint8 inputVelocity,
         bassNote = juce::jlimit (21, 72, bassNote + octaveBass * 12);
         currentBassNote = bassNote;
 
-        // In trigger mode, compute the pitch but let the MIDI trigger fire the bass.
-        bool sendBass = (mode == OutputMode::All || mode == OutputMode::Bass);
-        if (sendBass && ! bassTriggerModeParam.load())
+        auto triadQ = harmonyEngine.getChordQuality (degree);
+        int thirdIv = (triadQ == "m" || triadQ == "d") ? 3 : 4;
+        int fifthIv = (triadQ == "d") ? 6 : (triadQ == "A" ? 8 : 7);
+        bassEngine.setCurrentChord (degree, currentBassNote, fifthIv, thirdIv);
+
+        // Inline root bass only when Bass tab is active, bassMode == Root,
+        // and MIDI trigger mode is off. All other bass modes are emitted by
+        // BassEngine::process() from processBlock.
+        // Inline fire only when bassMode == Root. Kick modes fire from the
+        // MIDI trigger path in processBlock.
+        if (sendBass_ && bassEngine.firesInlineOnChordPress())
         {
-            int bassCh = (mode == OutputMode::All) ? kBassChannel : 1;
+            int bassCh = kBassChannel;
             int bassOffset = juce::jmin (samplePosition, currentBlockSize - 1);
             out.addEvent (juce::MidiMessage::noteOn (bassCh, currentBassNote, (juce::uint8) 70), bassOffset);
             bassSynthMidi.addEvent (juce::MidiMessage::noteOn (1, currentBassNote, (juce::uint8) 70), bassOffset);
         }
     }
-
-    // Feed chord to arpeggiator — restart from position 0
-    auto sorted = currentChordNotes;
-    std::sort (sorted.begin(), sorted.end());
-    arpeggiator.setChord (sorted);
-    arpeggiator.reset();
-    if (arpEnabled.load())
-        arpeggiator.setActive (true);
 
     currentDegree = degree;
     activeDegree.store (degree);
@@ -1140,8 +1059,11 @@ void FormaProcessor::triggerChord (int degree, juce::uint8 inputVelocity,
     else nonTonicChordCount++;
     if (nonTonicChordCount >= 6) checkKeySuggestion();
 
-    // Update register drift tracking
-    harmonyEngine.updateDriftTracking (currentChordNotes);
+    // Update register drift tracking on the canonical 4-voice voicing
+    // (pre-octave-shift, pre-voicing-mode-reduction). currentChordNotes has
+    // chordShift applied and may have voices removed by Upper/Shell modes,
+    // both of which would skew the drift estimate.
+    harmonyEngine.updateDriftTracking (prevChordNotes);
 
     // Immediately update suggestion display on every press
     // (anchor commit in releaseChord updates Markov state later)
@@ -1186,21 +1108,16 @@ void FormaProcessor::triggerChord (int degree, juce::uint8 inputVelocity,
 
 void FormaProcessor::releaseChord (juce::MidiBuffer& out, int samplePosition)
 {
-    auto mode = static_cast<OutputMode> (outputMode.load());
+    const bool relChords = chordsEnabled.load();
+    const bool relBass   = bassEnabled.load();
 
-    // Cancel ALL pending strum note-ons
     pendingNotes.clear();
 
-    // Release chord notes on MIDI output
-    bool relChords = (mode == OutputMode::All || mode == OutputMode::Chords);
     if (relChords)
-    {
-        int ch = (mode == OutputMode::All) ? kChordChannel : 1;
         for (int note : currentChordNotes)
-            out.addEvent (juce::MidiMessage::noteOff (ch, note), samplePosition);
-    }
+            out.addEvent (juce::MidiMessage::noteOff (kChordChannel, note), samplePosition);
 
-    // ALWAYS release chord notes on chord synth (regardless of output mode)
+    // ALWAYS release chord notes on chord synth (catch stuck voices).
     for (int note : currentChordNotes)
         chordSynthMidi.addEvent (juce::MidiMessage::noteOff (1, note), samplePosition);
     currentChordNotes.clear();
@@ -1208,36 +1125,17 @@ void FormaProcessor::releaseChord (juce::MidiBuffer& out, int samplePosition)
     // Release bass
     if (currentBassNote >= 0)
     {
-        bool relBass = (mode == OutputMode::All || mode == OutputMode::Bass);
         if (relBass)
-        {
-            int ch = (mode == OutputMode::All) ? kBassChannel : 1;
-            out.addEvent (juce::MidiMessage::noteOff (ch, currentBassNote), samplePosition);
-        }
+            out.addEvent (juce::MidiMessage::noteOff (kBassChannel, currentBassNote), samplePosition);
         bassSynthMidi.addEvent (juce::MidiMessage::noteOff (1, currentBassNote), samplePosition);
         currentBassNote = -1;
     }
     triggeredBassPlaying = -1;
+    bassEngine.releaseChord();
 
-    // Stop arp
-    arpeggiator.setActive (false);
-    int arpOff = arpeggiator.flushPendingOff();
-    if (arpOff >= 0)
-    {
-        bool relArp = (mode == OutputMode::All || mode == OutputMode::Arp);
-        if (relArp)
-        {
-            int ch = (mode == OutputMode::All) ? kArpChannel : 1;
-            out.addEvent (juce::MidiMessage::noteOff (ch, arpOff), samplePosition);
-        }
-        arpSynthMidi.addEvent (juce::MidiMessage::noteOff (1, arpOff), samplePosition);
-    }
-    arpeggiator.reset();
-
-    // Safety: all-notes-off on all synths to catch leaked voices
+    // Safety: all-notes-off on both synths to catch leaked voices.
     chordSynthMidi.addEvent (juce::MidiMessage::allNotesOff (1), samplePosition);
     bassSynthMidi.addEvent (juce::MidiMessage::allNotesOff (1), samplePosition);
-    arpSynthMidi.addEvent (juce::MidiMessage::allNotesOff (1), samplePosition);
 
     // ── Anchor system: commit if held long enough ──
     if (lastPlayedDegree >= 1)

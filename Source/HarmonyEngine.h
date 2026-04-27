@@ -26,6 +26,14 @@ public:
     std::vector<int> getArpNotes (int degree);
     int getBassNote (int degree, bool altBass = false);
 
+    // Chord tone by index, with fallback chain per the arp/bass tab spec.
+    // toneIdx: 0=1, 1=3, 2=5, 3=7, 4=9, 5=11, 6=13.
+    // Returns the semitone offset from the degree root.
+    // outFound is set to the tone index that was actually resolved (may differ
+    // if the requested tone wasn't in the current extension tier and a
+    // fallback was used). If no fallback applies it resolves to 1 (root).
+    int getChordToneInterval (int degree, int toneIdx, int* outResolvedIdx = nullptr);
+
     // Voice leading — deterministic 4-voice assignment
     std::vector<int> getBestInversion (const std::vector<int>& chordTones,
                                        const std::vector<int>& prevVoices,
@@ -85,13 +93,40 @@ private:
     std::deque<float> recentMidpoints;
     float currentDrift = 0.0f;
 
+    // Recency-weighted voicing cache. Capacity 32 circular buffer of
+    // recent voicings, keyed by chord function (degree). Provides
+    // long-term register anchoring: when a function returns after a
+    // long progression, its cached voicings pull the new candidate
+    // back toward the prior voicing's register. Decay rate is driven
+    // by the color knob — pop circularity at low color, jazz
+    // exploration at high color.
+    struct CachedVoicing {
+        int   functionId   = -1;     // 1..7 (degree); -1 = empty slot
+        int   voicing[4]   = {0,0,0,0};
+        int   colorTier    = 1;
+        float ageInChords  = 0.0f;
+    };
+    static constexpr int kCacheCapacity = 32;
+    std::array<CachedVoicing, kCacheCapacity> voicingCache;
+    int   cacheNextSlot     = 0;
+    int   cacheSize         = 0;
+    int   currentFunctionId = -1;     // set at top of getBestInversion
+
 public:
     void updateDriftTracking (const std::vector<int>& voicedChord);
+    void commitVoicingToCache (int degree, const std::vector<int>& voicedChord);
+    void clearVoicingCache();
 private:
+    void ageVoicingCache();
+    float computeAttractionDelta (const int candidateNotes[4]) const;
+    int   findRecentCachedBass (int functionId) const;
+    const CachedVoicing* findRecentCachedEntry (int functionId) const;
 
     // Helpers
     std::vector<int> getUpperPCs (const std::vector<int>& chordTones);
     int findNearestOctave (int pc, int target, int lo, int hi);
+    int findNearestOctaveDriftAware (int pc, int target, int lo, int hi,
+                                      int cacheHint = -1, float cacheWeight = 0.0f);
 
     void buildScale();
     std::vector<int> voice (const std::vector<int>& notes);

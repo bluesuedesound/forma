@@ -357,9 +357,15 @@ void WaveformDisplay::mouseDown (const juce::MouseEvent& e)
     }
     else if (sampleMode)
     {
-        // SAMPLE mode: any click not on a handle initiates a vertical pitch
-        // drag. Region-drag is intentionally disabled here so the waveform's
-        // primary gesture is pitch, matching the design.
+        // SAMPLE mode: click anywhere on the waveform body triggers playback
+        // from that position. Vertical dragging afterwards still edits pitch,
+        // so play-from-position and pitch-drag coexist on a single gesture.
+        if (onPlayFromPosition)
+        {
+            const float normalised = juce::jlimit (0.0f, 1.0f, mx);
+            onPlayFromPosition (normalised);
+        }
+
         currentDrag     = PitchVertical;
         pitchDragStartY = e.position.getY();
         lastEmittedDelta = 0;

@@ -82,22 +82,15 @@ private:
     int pressedChordIdx = -1;
 
     // XY pad
-    float dotX = 0.5f, dotY = 0.5f;  // normalized 0..1
+    float dotX = 0.5f, dotY = 0.5f;
     float glowX = 0.5f, glowY = 0.5f;
     bool draggingDot = false;
 
     // Advanced overlay state
     bool advancedVisible = false;
-    int bassMode = 0;  // 0=off (chords only mapped), 1=on/root, 2=on/alt
-    bool bassOn = true;
-    bool bassAlt = false;
-    int bassOct = -1;
-    bool arpOnState = false;
-    int arpPattern = 0, arpRate = 1, arpSpread = 0, arpOct = 0;
-    float arpGateVal = 0.8f;
-    float synthVol = 0.7f;
-    int currentOutputMode = 0;
-    int currentSyncMode = 2;
+    int  bassOct       = -1;
+    float synthVol     = 0.7f;
+    int   currentSyncMode = 2;
 
     // Suggestion pulse
     float sugPulse = 0.0f, sugDir = 1.0f;
@@ -113,7 +106,7 @@ private:
     float progNameAge = 0.0f;
 
     // ── Thermal field visual ──
-    int   lastKnownDeg = -1, lastKnownArp = -1;
+    int   lastKnownDeg = -1;
     float breathePhase = 0.0f;
 
     // Wave phase accumulators
@@ -139,7 +132,7 @@ private:
     float moodTransProgress = 1.0f;
 
     // Layout rects
-    juce::Rectangle<int> leftCol, centerCol;
+    juce::Rectangle<int> leftCol, centerCol, rightCol;
     juce::Rectangle<int> xyPadCircle;
     juce::Rectangle<int> compassContainer;
     juce::Rectangle<int> chordKeyRects[7];
@@ -151,26 +144,13 @@ private:
 
     // Advanced overlay rects
     juce::Rectangle<int> advCloseRect;
-    juce::Rectangle<int> advSoundPills[6];    // KEYS, FELT, GLASS, TAPE, AMBIENT, MALLET
+    juce::Rectangle<int> advSoundPills[6];
     int currentSoundPreset = 0;
-    juce::Rectangle<int> advVoicingPills[3];  // FULL, UPPER, SHELL
+    juce::Rectangle<int> advVoicingPills[3];
     int currentVoicingMode = 0;
-    juce::Rectangle<int> advOutputPills[4];   // ALL, CHORDS, BASS, ARP
-    juce::Rectangle<int> advSyncPills[4];     // FULL, EXPR, HARM, FREE
+    juce::Rectangle<int> advSyncPills[4];
     juce::Rectangle<int> advChordOctMinRect, advChordOctPlRect;
     int chordOctVal = 0;
-    juce::Rectangle<int> advBassOnRect, advBassAltRect;
-    juce::Rectangle<int> advBassOctMinRect, advBassOctPlRect;
-    juce::Rectangle<int> advBassTrigToggleRect;
-    juce::Rectangle<int> advBassTrigNoteMinRect, advBassTrigNotePlRect;
-    bool bassTrig = false;
-    int  bassTrigNote = 0;
-    juce::Rectangle<int> advArpOnRect;
-    juce::Rectangle<int> advMotifPills[6];
-    juce::Rectangle<int> advRatePills[3];
-    juce::Rectangle<int> advSpreadPills[2];
-    juce::Rectangle<int> advGateSlider;
-    juce::Rectangle<int> advArpOctMinRect, advArpOctPlRect;
     juce::Rectangle<int> advSynthSlider;
 
     // Preset slot rects
@@ -180,7 +160,20 @@ private:
     juce::Rectangle<int> advSuggestionsToggleRect;
     juce::Rectangle<int> advSuggestionsResetRect;
     bool suggestionsOn = true;
-    float resetFlashTimer = 0.0f;  // for visual flash on reset press
+    float resetFlashTimer = 0.0f;
+
+    // ── Right column — voice toggles + bass section ──
+    juce::Rectangle<int> rightChordsToggleRect;
+    juce::Rectangle<int> rightBassToggleRect;
+    juce::Rectangle<int> bassModePills[3];           // ROOT / KICK / KICK+VAR
+    juce::Rectangle<int> bassOctMinRect, bassOctPlRect;
+    juce::Rectangle<int> bassTrigNoteMinRect, bassTrigNotePlRect;
+    juce::Rectangle<int> bassVariationSlider;
+    bool  chordsEnabledUI = true;
+    bool  bassEnabledUI   = true;
+    int   bassModeUI      = 0;
+    int   bassTrigNoteUI  = 0;
+    float bassVariationUI = 0.30f;
 
     // Font helper
     juce::Font mono (float h) const;
@@ -190,6 +183,7 @@ private:
     void drawTopBar      (juce::Graphics& g);
     void drawLeftCol     (juce::Graphics& g);
     void drawCenter      (juce::Graphics& g);
+    void drawRightCol    (juce::Graphics& g);
     void drawStatusBar   (juce::Graphics& g);
     void drawChordKey    (juce::Graphics& g, juce::Rectangle<int> r, int idx);
     void drawXYPad       (juce::Graphics& g);
@@ -198,6 +192,23 @@ private:
     void drawStepper     (juce::Graphics& g, juce::Rectangle<int> r, const char* label, int val);
     void drawToggle      (juce::Graphics& g, juce::Rectangle<int> r, bool on);
     void drawMiniSlider  (juce::Graphics& g, juce::Rectangle<int> r, float val);
+
+    // Lofi grain texture — generated once in the constructor and tiled as a
+    // low-opacity overlay over surfaces.
+    juce::Image grainTile;
+    void buildGrainTile();
+    void drawGrainOverlay (juce::Graphics& g, juce::Rectangle<int> area, float opacity);
+
+    // ── Per-pill animation state ──
+    // Resting: no active chord; Active: chord held / persistent glow;
+    // Flashing: 1100 ms chord-name-reveal animation overlay on top of Active.
+    struct PillAnim {
+        enum class State { Resting, Active, Flashing };
+        State state = State::Resting;
+        double flashStartMs = 0.0;
+    };
+    PillAnim pillAnim[7];
+    bool anyPillAnimating() const;
 
     void updateChordLabels();
     void setMood (int idx);

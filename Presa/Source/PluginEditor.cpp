@@ -56,6 +56,12 @@ PresaEditor::PresaEditor (PresaProcessor& p)
     setOpaque (true);
     setLookAndFeel (&lnf);
 
+    // Spacebar is the primary SAMPLE-mode trigger, so the editor needs
+    // keyboard focus to receive key events. grabKeyboardFocus() happens once
+    // we're attached to a peer; setWantsKeyboardFocus alone is enough for
+    // the KeyListener path inside JUCE's Component.
+    setWantsKeyboardFocus (true);
+
     // Wire up pad states to child components
     waveformDisplay.setSliceRange (0.0f, 1.0f);
     stateDotField.setPadStates (proc.pads, PresaProcessor::kNumPads);
@@ -127,6 +133,19 @@ PresaEditor::PresaEditor (PresaProcessor& p)
         waveformDisplay.setPitchOverlay (target);
     };
 
+    // Clicking the waveform body in SAMPLE mode starts playback at that
+    // position. Pitch is C4 (root) so the sample plays at native speed apart
+    // from any pitch/speed multipliers the user has dialled in.
+    waveformDisplay.onPlayFromPosition = [this] (float normalised)
+    {
+        if (proc.getSamplerMode() != SamplerMode::Sample)
+            return;
+        proc.triggerSamplePlaybackFromPosition (PresaProcessor::kSampleModeRootMidi,
+                                                normalised);
+        playButtonShowsStop = true;
+        refreshPlayButton();
+    };
+
     // Add child components
     addAndMakeVisible (waveformDisplay);
     addAndMakeVisible (stateDotField);
@@ -141,7 +160,7 @@ PresaEditor::PresaEditor (PresaProcessor& p)
 
     // SAMPLE-mode toggles. Visible only when the processor is in SAMPLE mode
     // (gated in resized()); styled as ACCENT pills when active, DARK when not.
-    for (auto* btn : { &loopBtn, &reverseBtn })
+    for (auto* btn : { &loopBtn, &reverseBtn, &playBtn })
     {
         btn->setClickingTogglesState (false);
         addChildComponent (btn);
@@ -159,7 +178,9 @@ PresaEditor::PresaEditor (PresaProcessor& p)
         refreshSampleControlButtons();
         waveformDisplay.setReversedVisible (proc.isReversed());
     };
+    playBtn.onClick = [this] { togglePlayPause(); };
     refreshSampleControlButtons();
+    refreshPlayButton();
 
     // Mode toggle — flip between Slice and Sample, refresh label + layout.
     modeBtn.onClick = [this]
@@ -260,6 +281,54 @@ void PresaEditor::refreshSampleControlButtons()
     style (reverseBtn, proc.isReversed());
 }
 
+void PresaEditor::refreshPlayButton()
+{
+    // Treat both our edge flag and live voice state as "playing" — the edge
+    // flag updates instantly on click/space/MIDI; the voice state catches the
+    // case where a non-looping sample has naturally finished.
+    const bool playing = playButtonShowsStop || proc.isSamplePlaybackActive();
+    playBtn.setButtonText (playing ? "STOP" : "PLAY");
+    playBtn.setColour (juce::TextButton::buttonColourId,
+                       playing ? Palette::ACCENT() : Palette::DARK());
+    playBtn.setColour (juce::TextButton::textColourOffId,
+                       playing ? Palette::TXT_HI() : Palette::TXT_HI());
+    playBtn.repaint();
+}
+
+void PresaEditor::togglePlayPause()
+{
+    // Gate to SAMPLE mode. SLICE mode uses per-pad triggering and has no
+    // concept of a single global play/stop.
+    if (proc.getSamplerMode() != SamplerMode::Sample)
+        return;
+
+    const bool playing = playButtonShowsStop || proc.isSamplePlaybackActive();
+    if (playing)
+    {
+        proc.stopSamplePlayback();
+        playButtonShowsStop = false;
+    }
+    else
+    {
+        proc.triggerSamplePlayback (PresaProcessor::kSampleModeRootMidi);
+        playButtonShowsStop = true;
+    }
+    refreshPlayButton();
+}
+
+bool PresaEditor::keyPressed (const juce::KeyPress& key)
+{
+    // Spacebar is the primary SAMPLE-mode play/stop trigger. Ignored in
+    // SLICE mode so typing into the (future) search doesn't hijack play.
+    if (key == juce::KeyPress::spaceKey
+        && proc.getSamplerMode() == SamplerMode::Sample)
+    {
+        togglePlayPause();
+        return true;
+    }
+    return false;
+}
+
 // Discrete speed ladder. Small enough that dragging a few pixels produces
 // a recognisable jump rather than a smooth sweep — matches the design brief.
 static const float kSpeedSteps[] = { 0.25f, 0.5f, 0.75f, 1.0f, 1.5f, 2.0f, 3.0f, 4.0f };
@@ -299,6 +368,13 @@ void PresaEditor::timerCallback()
     captureDotPhase += dt * juce::MathConstants<float>::twoPi * 0.7f;
     if (captureDotPhase > juce::MathConstants<float>::twoPi * 100.0f)
         captureDotPhase -= juce::MathConstants<float>::twoPi * 100.0f;
+
+    // Spacebar only fires while the editor has keyboard focus. Claim it
+    // whenever we're showing but don't hold it — hosts that embed the editor
+    // can still direct keys elsewhere, but with no child stealing focus we
+    // remain the default sink.
+    if (isShowing() && ! hasKeyboardFocus (true))
+        grabKeyboardFocus();
 
    #if JucePlugin_Build_Standalone
     // Keep EXPORT enabled-state synced with whether a sample is loaded.
@@ -361,6 +437,18 @@ void PresaEditor::timerCallback()
     stateDotField.setAmbientEngaged (
         (proc.getSamplerMode() == SamplerMode::Sample)
         && proc.isAmbientEngaged());
+
+    // Keep the PLAY pill in sync with live voice state so a non-looping
+    // sample finishing naturally flips the button back to PLAY without a
+    // user click. The edge-driven playButtonShowsStop flag is cleared here
+    // once the audio engine confirms it has actually stopped.
+    if (proc.getSamplerMode() == SamplerMode::Sample)
+    {
+        const bool voiceActive = proc.isSamplePlaybackActive();
+        if (playButtonShowsStop && ! voiceActive)
+            playButtonShowsStop = false;
+        refreshPlayButton();
+    }
 
     repaint();  // top bar + status bar
 }
@@ -435,6 +523,7 @@ void PresaEditor::resized()
         // SAMPLE-mode controls hidden in SLICE.
         loopBtn.setVisible (false);
         reverseBtn.setVisible (false);
+        playBtn.setVisible (false);
     }
     else
     {
@@ -446,32 +535,44 @@ void PresaEditor::resized()
         padGrid.setVisible (false);
         stateDotField.setBounds (0, y, dotW, lowerH);
 
-        // Three horizontal rows inside the control panel.
-        // Row 1 (pitch + speed displays) ~55% of height
-        // Row 2 (LOOP + REVERSE pills)    ~25%
-        // Row 3 (EXPORT)                  ~20%
-        const int rowPad = 10;
-        const int rowTopY    = y + rowPad;
-        const int rowTopH    = (int) (lowerH * 0.55f);
-        const int rowMidY    = rowTopY + rowTopH;
-        const int rowMidH    = (int) (lowerH * 0.22f);
-        const int rowBotY    = rowMidY + rowMidH;
-        const int rowBotH    = lowerH - (rowTopH + rowMidH) - rowPad;
+        // Four horizontal rows inside the control panel.
+        // Row 0 (PLAY pill, prominent) ~18% of height
+        // Row 1 (pitch + speed displays) ~42%
+        // Row 2 (LOOP + REVERSE pills)   ~22%
+        // Row 3 (EXPORT)                 ~18%
+        const int rowPad  = 10;
+        const int playH   = (int) (lowerH * 0.18f);
+        const int topH    = (int) (lowerH * 0.42f);
+        const int midH    = (int) (lowerH * 0.22f);
+
+        const int playY   = y + rowPad;
+        const int rowTopY = playY + playH;
+        const int rowMidY = rowTopY + topH;
+        const int rowBotY = rowMidY + midH;
+        const int rowBotH = lowerH - (playH + topH + midH) - rowPad;
+
+        // Row 0: PLAY — larger than LOOP/REVERSE, horizontally centred.
+        const int playPillW = 140;
+        const int playPillH = 32;
+        const int playPillX = ctrlX + (ctrlW - playPillW) / 2;
+        const int playPillY = playY + (playH - playPillH) / 2;
+        playBtn.setVisible (true);
+        playBtn.setBounds (playPillX, playPillY, playPillW, playPillH);
 
         // Row 1: split pitch/speed 50/50.
         const int rowTopInnerX = ctrlX + 16;
         const int rowTopInnerW = ctrlW - 32;
         const int halfW = rowTopInnerW / 2;
 
-        pitchDragRect = { rowTopInnerX,          rowTopY, halfW,  rowTopH };
-        speedDragRect = { rowTopInnerX + halfW,  rowTopY, halfW,  rowTopH };
+        pitchDragRect = { rowTopInnerX,          rowTopY, halfW,  topH };
+        speedDragRect = { rowTopInnerX + halfW,  rowTopY, halfW,  topH };
 
         // Row 2: loop + reverse pills, centred inside the panel.
         const int pillW = 86;
         const int pillH = 24;
         const int pillGap = 12;
         const int pillTotal = pillW * 2 + pillGap;
-        const int pillY = rowMidY + (rowMidH - pillH) / 2;
+        const int pillY = rowMidY + (midH - pillH) / 2;
         const int pillX = ctrlX + (ctrlW - pillTotal) / 2;
 
         loopBtn.setVisible (true);
@@ -815,16 +916,56 @@ void PresaEditor::exportSample()
         }
     }
 
-    auto now = juce::Time::getCurrentTime();
-    auto filename = juce::String ("Presa_")
-                  + now.formatted ("%Y%m%d_%H%M%S")
-                  + ".wav";
-    auto outputFile = folder.getChildFile (filename);
+    // ── Filename prompt ───────────────────────────────────────────────────
+    // Modal alert with a text field pre-populated with the timestamped
+    // default. runModalLoop is acceptable in the standalone build where a
+    // message thread is always running.
+    const juce::String timestamp = juce::Time::getCurrentTime()
+                                        .formatted ("%Y%m%d_%H%M%S");
+    const juce::String defaultName = "Presa_" + timestamp;
 
-    // Delete any stale file with the same name so createWriterFor doesn't
-    // append onto an existing WAV header.
-    if (outputFile.existsAsFile())
-        outputFile.deleteFile();
+    juce::AlertWindow namePrompt ("Export Sample",
+                                  "Name your sample:",
+                                  juce::MessageBoxIconType::NoIcon);
+
+    // Forma-palette tint. JUCE's AlertWindow respects these colour IDs; the
+    // buttons inherit from the look-and-feel's TextButton colours.
+    namePrompt.setColour (juce::AlertWindow::backgroundColourId, Palette::BG());
+    namePrompt.setColour (juce::AlertWindow::textColourId,       Palette::TXT_HI());
+    namePrompt.setColour (juce::AlertWindow::outlineColourId,    Palette::BORDER());
+
+    namePrompt.addTextEditor ("filename", defaultName, "");
+    namePrompt.addButton ("Export", 1, juce::KeyPress (juce::KeyPress::returnKey));
+    namePrompt.addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+
+    // Pre-select so the user can start typing immediately.
+    if (auto* editor = namePrompt.getTextEditor ("filename"))
+        editor->selectAll();
+
+    const int result = namePrompt.runModalLoop();
+    if (result == 0)
+        return;  // user cancelled — no status update, no flash
+
+    auto userFilename = namePrompt.getTextEditorContents ("filename").trim();
+    if (userFilename.isEmpty())
+        userFilename = defaultName;
+
+    // Strip characters that are invalid in filenames on macOS/Windows.
+    userFilename = userFilename.replaceCharacters ("/\\:*?\"<>|",
+                                                    "_________");
+
+    auto outputFile = folder.getChildFile (userFilename + ".wav");
+
+    // On collision, append _1, _2, … rather than overwriting silently so the
+    // user's prior export is never lost.
+    int suffix = 1;
+    while (outputFile.exists())
+    {
+        outputFile = folder.getChildFile (userFilename + "_"
+                                          + juce::String (suffix++) + ".wav");
+    }
+
+    const juce::String filename = outputFile.getFileName();
 
     // WavAudioFormat takes ownership of the FileOutputStream on success;
     // we must release() only after createWriterFor returns a non-null writer.

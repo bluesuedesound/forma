@@ -135,7 +135,7 @@ int SamplePlayer::findFreeVoice (int padIndex) const
     return best;
 }
 
-void SamplePlayer::noteOn (int padIndex, int midiNote, int rootNote)
+void SamplePlayer::noteOn (int padIndex, int midiNote, int rootNote, int startSampleOverride)
 {
     if (sampleLength == 0 || padIndex < 0 || padIndex >= kNumPads)
     {
@@ -172,9 +172,22 @@ void SamplePlayer::noteOn (int padIndex, int midiNote, int rootNote)
 
     // Start from slice end when reversed so the voice plays toward the start.
     const auto& slice = slices[padIndex];
-    v.playhead = reversed.load()
-               ? static_cast<double> (juce::jmax (slice.start, slice.end - 1))
-               : static_cast<double> (slice.start);
+    if (startSampleOverride >= 0)
+    {
+        // Caller asked us to drop the playhead at an absolute sample index.
+        // Clamp into the slice so an out-of-range click can't escape the
+        // sounding region.
+        const int clamped = juce::jlimit (slice.start,
+                                          juce::jmax (slice.start, slice.end - 1),
+                                          startSampleOverride);
+        v.playhead = static_cast<double> (clamped);
+    }
+    else
+    {
+        v.playhead = reversed.load()
+                   ? static_cast<double> (juce::jmax (slice.start, slice.end - 1))
+                   : static_cast<double> (slice.start);
+    }
 
     v.basePitchRatio = std::pow (2.0, (midiNote - rootNote) / 12.0)
                      * (static_cast<double> (sampleOriginalRate) / hostSampleRate);
@@ -399,4 +412,13 @@ void SamplePlayer::processBlock (juce::AudioBuffer<float>& output, int numSample
         }
         nextVoice:;
     }
+
+    // Publish voice-activity state once per block so the UI can poll it
+    // without reaching into the voice array.
+    bool anyActive = false;
+    for (const auto& v : voices)
+    {
+        if (v.active) { anyActive = true; break; }
+    }
+    anyVoiceActive.store (anyActive);
 }

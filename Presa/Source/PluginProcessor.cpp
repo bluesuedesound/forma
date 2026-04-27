@@ -163,23 +163,41 @@ void PresaProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiB
         }
     }
 
-    // Process MIDI: notes 36-51 (C2-D#3) → pads 0-15
+    // Process MIDI. Routing depends on the sampler mode: SLICE maps
+    // notes 36–51 (C2–D#3) onto pads 0–15 so each pad plays its chunk;
+    // SAMPLE routes every note through triggerSamplePlayback so the full
+    // sample retunes relative to C4 (the SAMPLE-mode root).
+    const bool sampleModeRouting = (samplerMode.load() == SamplerMode::Sample);
     for (const auto metadata : midiMessages)
     {
         auto msg = metadata.getMessage();
         if (msg.isNoteOn())
         {
             int note = msg.getNoteNumber();
-            int padIndex = note - kMidiBase;
-            if (padIndex >= 0 && padIndex < kNumPads)
-                samplePlayer.noteOn (padIndex, note, pads[padIndex].rootNote);
+            if (sampleModeRouting)
+            {
+                triggerSamplePlayback (note);
+            }
+            else
+            {
+                int padIndex = note - kMidiBase;
+                if (padIndex >= 0 && padIndex < kNumPads)
+                    samplePlayer.noteOn (padIndex, note, pads[padIndex].rootNote);
+            }
         }
         else if (msg.isNoteOff())
         {
             int note = msg.getNoteNumber();
-            int padIndex = note - kMidiBase;
-            if (padIndex >= 0 && padIndex < kNumPads)
-                samplePlayer.noteOff (padIndex);
+            if (sampleModeRouting)
+            {
+                stopSamplePlayback();
+            }
+            else
+            {
+                int padIndex = note - kMidiBase;
+                if (padIndex >= 0 && padIndex < kNumPads)
+                    samplePlayer.noteOff (padIndex);
+            }
         }
     }
 
@@ -417,6 +435,35 @@ void PresaProcessor::releasePadFromUI (int padIndex)
 {
     if (padIndex >= 0 && padIndex < kNumPads)
         samplePlayer.noteOff (padIndex);
+}
+
+// ── SAMPLE-mode global playback ────────────────────────────────────────────
+//
+// Pad 0 is used as the canonical voice for SAMPLE mode. Its slice region is
+// kept in sync with the trim window by setTrimRange, so playback respects the
+// user's trim handles. midiNote is resolved against kSampleModeRootMidi (60)
+// so C4 plays at native pitch.
+
+void PresaProcessor::triggerSamplePlayback (int midiNote)
+{
+    samplePlayer.noteOn (0, midiNote, kSampleModeRootMidi);
+}
+
+void PresaProcessor::triggerSamplePlaybackFromPosition (int midiNote,
+                                                        float normalizedPosition)
+{
+    const int total = samplePlayer.getSampleLength();
+    if (total <= 0)
+        return;
+
+    const int startSample = juce::jlimit (0, total - 1,
+                                          static_cast<int> (normalizedPosition * total));
+    samplePlayer.noteOn (0, midiNote, kSampleModeRootMidi, startSample);
+}
+
+void PresaProcessor::stopSamplePlayback()
+{
+    samplePlayer.noteOff (0);
 }
 
 // ── Editor ─────────────────────────────────────────────────────────────────

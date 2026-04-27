@@ -197,6 +197,7 @@ HarmonyEngine::HarmonyEngine() { buildScale(); }
 void HarmonyEngine::setMood (const juce::String& mood)
 {
     if (findMood (mood) == nullptr) return;
+    if (mood != currentMood) clearVoicingCache();
     currentMood = mood;
     targetRegisterCenter = getMoodRegisterTarget (mood);
     buildScale();
@@ -330,6 +331,72 @@ std::vector<int> HarmonyEngine::getArpNotes (int degree)
     return notes;
 }
 
+// ── Chord tone by index with fallback ──────────────────────────────────────
+
+int HarmonyEngine::getChordToneInterval (int degree, int toneIdx, int* outResolvedIdx)
+{
+    if (degree < 1 || degree > 7)
+    {
+        if (outResolvedIdx) *outResolvedIdx = 0;
+        return 0;
+    }
+
+    auto q = scaleQualities[(size_t) (degree - 1)];
+    auto triad = getTriad (q);  // { 0, 3rd, 5th }
+    int tier = getColorTier (degree, colorAmount);
+    auto& exts = extData[(size_t) (degree - 1)][tier];
+
+    // Extensions in computeExtensions are ordered { s7, s9, s13 } per tier.
+    // Index into exts: tier=2 → [s7]; tier=3 → [s7, s9]; tier=4 → [s7, s9, s13].
+    auto extAt = [&] (int which) -> int {
+        // which: 0=7, 1=9, 2=13
+        if (which < (int) exts.size()) return exts[(size_t) which];
+        return INT_MIN;  // not present
+    };
+
+    auto tryTone = [&] (int idx) -> int {
+        switch (idx)
+        {
+            case 0: return 0;             // root
+            case 1: return triad[1];      // 3rd
+            case 2: return triad[2];      // 5th
+            case 3: return extAt (0);     // 7th
+            case 4: return extAt (1);     // 9th
+            case 5: return 5;             // 11th — synthesised as perfect 4th
+            case 6: return extAt (2);     // 13th
+            default: return INT_MIN;
+        }
+    };
+
+    // Fallback order per spec:
+    //   7 → 5 → 3 → 1
+    //   9 → 7 → 5 → 3 → 1
+    //   11 → 9 → 7 → 5 → 3 → 1
+    //   13 → 11 → 9 → 7 → 5 → 3 → 1
+    static const std::vector<std::vector<int>> chains = {
+        { 0 },                           // 1
+        { 1, 0 },                        // 3
+        { 2, 1, 0 },                     // 5
+        { 3, 2, 1, 0 },                  // 7
+        { 4, 3, 2, 1, 0 },               // 9
+        { 5, 4, 3, 2, 1, 0 },            // 11 (11 always available since synthesised)
+        { 6, 5, 4, 3, 2, 1, 0 }          // 13
+    };
+
+    int clampedIdx = juce::jlimit (0, 6, toneIdx);
+    for (int candidate : chains[(size_t) clampedIdx])
+    {
+        int v = tryTone (candidate);
+        if (v != INT_MIN)
+        {
+            if (outResolvedIdx) *outResolvedIdx = candidate;
+            return v;
+        }
+    }
+    if (outResolvedIdx) *outResolvedIdx = 0;
+    return 0;
+}
+
 // ── Get bass note ──────────────────────────────────────────────────────────
 
 int HarmonyEngine::getBassNote (int degree, bool altBass)
@@ -381,6 +448,195 @@ int HarmonyEngine::findNearestOctave (int pc, int target, int lo, int hi)
     return best;
 }
 
+// Octave selector with two modes:
+//
+//   No cache (cacheHint < 0 or cacheWeight <= 0): drift-aware tiebreaker
+//   from Pass 1 / F+C+D. Among candidates within slack of the strict-nearest
+//   distance, pick the octave whose direction best opposes currentDrift.
+//
+//   With cache (Pass 2): the candidate set is the octaves of pc within
+//   ±12 of target and legal range, plus the cached octave when it lies
+//   within an `effectiveCap` window around target. Each candidate is
+//   scored by `smoothness + pull`, where pull = |c - cacheHint| · weight ·
+//   cachePullWeight. The cap depends on weight (recency strength) and
+//   color (jazz-ness): 12 / 7 / 4 for weight ≥ 0.5 / ≥ 0.2 / else,
+//   attenuated by color, floor 4. The cap controls reachability of the
+//   cached octave when it's outside the smoothness ±12 window — within
+//   ±12 it's a candidate regardless and the pull does the work.
+int HarmonyEngine::findNearestOctaveDriftAware (int pc, int target, int lo, int hi,
+                                                  int cacheHint, float cacheWeight)
+{
+    // ── No cache: Pass 1 drift-aware tiebreaker. ──────────────────────────
+    if (cacheHint < 0 || cacheWeight <= 0.0f)
+    {
+        int bestDist = INT_MAX;
+        for (int oct = 0; oct <= 9; ++oct)
+        {
+            int cand = oct * 12 + (pc % 12);
+            if (cand < lo || cand > hi) continue;
+            int d = std::abs (cand - target);
+            if (d < bestDist) bestDist = d;
+        }
+        if (bestDist == INT_MAX) return target;
+
+        const float absDrift = std::abs (currentDrift);
+        const float slack = (absDrift < 4.0f)
+                                ? 0.0f
+                                : juce::jmin (8.0f, 0.25f * absDrift);
+
+        int best = -1;
+        int bestScore = INT_MAX;
+        for (int oct = 0; oct <= 9; ++oct)
+        {
+            int cand = oct * 12 + (pc % 12);
+            if (cand < lo || cand > hi) continue;
+            int d = std::abs (cand - target);
+            if ((float) (d - bestDist) > slack) continue;
+
+            int score;
+            if      (currentDrift > 0.0f) score =  cand;
+            else if (currentDrift < 0.0f) score = -cand;
+            else                          score =  d;
+            if (score < bestScore) { bestScore = score; best = cand; }
+        }
+        return (best == -1) ? target : best;
+    }
+
+    // ── Cache-aware: Pass 2 cap + pull. ───────────────────────────────────
+    float baseCap = (cacheWeight >= 0.5f) ? 12.0f
+                  : (cacheWeight >= 0.2f) ?  7.0f
+                                          :  4.0f;
+    float effectiveCap = baseCap * (1.0f - colorAmount * 0.5f);
+    if (effectiveCap < 4.0f) effectiveCap = 4.0f;
+    const int capInt = (int) std::round (effectiveCap);
+
+    // Candidates: octaves of pc within ±12 of target and legal range.
+    int cands[16];
+    int nCands = 0;
+    for (int oct = 0; oct <= 9; ++oct)
+    {
+        int c = oct * 12 + (pc % 12);
+        if (c < lo || c > hi) continue;
+        if (std::abs (c - target) > 12) continue;
+        if (nCands < 16) cands[nCands++] = c;
+    }
+
+    // Cache override: ensure cached octave is in the candidate list when
+    // it's reachable within the cap (may lie outside the ±12 smoothness
+    // window when cap > 12 — currently capped at 12, so this only adds
+    // a candidate that was already included; kept for forward-compat).
+    if (cacheHint >= lo && cacheHint <= hi
+        && std::abs (cacheHint - target) <= capInt)
+    {
+        bool present = false;
+        for (int i = 0; i < nCands; ++i)
+            if (cands[i] == cacheHint) { present = true; break; }
+        if (!present && nCands < 16) cands[nCands++] = cacheHint;
+    }
+
+    if (nCands == 0)
+        return findNearestOctave (pc, target, lo, hi);
+
+    // Score each candidate: smoothness (distance from prev) + cache pull
+    // (penalty for distance from cached, scaled by recency weight).
+    constexpr float cachePullWeight = 0.8f;
+    int   best = cands[0];
+    float bestCost = std::numeric_limits<float>::infinity();
+    for (int i = 0; i < nCands; ++i)
+    {
+        int c = cands[i];
+        float smooth = (float) std::abs (c - target);
+        float pull   = (float) std::abs (c - cacheHint) * cacheWeight * cachePullWeight;
+        float total  = smooth + pull;
+        if (total < bestCost) { bestCost = total; best = c; }
+    }
+    return best;
+}
+
+// ── Voicing cache ──────────────────────────────────────────────────────────
+
+void HarmonyEngine::clearVoicingCache()
+{
+    for (auto& e : voicingCache) e.functionId = -1;
+    cacheNextSlot = 0;
+    cacheSize = 0;
+    currentFunctionId = -1;
+}
+
+void HarmonyEngine::ageVoicingCache()
+{
+    for (int i = 0; i < cacheSize; ++i)
+        voicingCache[(size_t) i].ageInChords += 1.0f;
+}
+
+void HarmonyEngine::commitVoicingToCache (int degree, const std::vector<int>& v)
+{
+    if (degree < 1 || degree > 7) return;
+    if (v.size() < 4) return;
+
+    auto& slot = voicingCache[(size_t) cacheNextSlot];
+    slot.functionId  = degree;
+    slot.voicing[0]  = v[0];
+    slot.voicing[1]  = v[1];
+    slot.voicing[2]  = v[2];
+    slot.voicing[3]  = v[3];
+    slot.colorTier   = getColorTier (degree, colorAmount);
+    slot.ageInChords = 0.0f;
+
+    cacheNextSlot = (cacheNextSlot + 1) % kCacheCapacity;
+    if (cacheSize < kCacheCapacity) ++cacheSize;
+
+   #if JUCE_DEBUG
+    DBG ("voicingCache write: deg=" + juce::String (degree)
+         + " slot=" + juce::String ((cacheNextSlot + kCacheCapacity - 1) % kCacheCapacity)
+         + " v=[" + juce::String (v[0]) + " " + juce::String (v[1]) + " "
+                  + juce::String (v[2]) + " " + juce::String (v[3]) + "]"
+         + " size=" + juce::String (cacheSize));
+   #endif
+}
+
+float HarmonyEngine::computeAttractionDelta (const int candidateNotes[4]) const
+{
+    if (currentFunctionId < 0 || cacheSize == 0) return 0.0f;
+
+    const float decayRate = 0.05f + colorAmount * 0.45f;
+    constexpr float cacheAttractionWeight = 0.6f;
+
+    float sum = 0.0f;
+    for (int i = 0; i < cacheSize; ++i)
+    {
+        const auto& e = voicingCache[(size_t) i];
+        if (e.functionId != currentFunctionId) continue;
+        const float weight = std::exp (-e.ageInChords * decayRate);
+        float voiceDist = 0.0f;
+        for (int v = 0; v < 4; ++v)
+            voiceDist += (float) std::abs (candidateNotes[v] - e.voicing[v]);
+        sum += weight * voiceDist;
+    }
+    return cacheAttractionWeight * sum;
+}
+
+int HarmonyEngine::findRecentCachedBass (int functionId) const
+{
+    auto* e = findRecentCachedEntry (functionId);
+    return e ? e->voicing[0] : -1;
+}
+
+const HarmonyEngine::CachedVoicing*
+HarmonyEngine::findRecentCachedEntry (int functionId) const
+{
+    if (functionId < 0 || cacheSize == 0) return nullptr;
+    int   bestIdx = -1;
+    float bestAge = 1e9f;
+    for (int i = 0; i < cacheSize; ++i)
+    {
+        const auto& e = voicingCache[(size_t) i];
+        if (e.functionId != functionId) continue;
+        if (e.ageInChords < bestAge) { bestAge = e.ageInChords; bestIdx = i; }
+    }
+    return (bestIdx == -1) ? nullptr : &voicingCache[(size_t) bestIdx];
+}
+
 std::vector<int> HarmonyEngine::getUpperPCs (const std::vector<int>& chordTones)
 {
     if (chordTones.empty()) return {};
@@ -428,13 +684,43 @@ std::vector<int> HarmonyEngine::getBestInversion (
 
     int rootPC = chordTones[0] % 12;
 
-    // First chord or degree I: use canonical placement
-    if (!voiceCountSet || prevVoices.empty() || degree == 1)
+    // Cache lifecycle: each chord-press ages all entries by 1, and the
+    // function being voiced is exposed so the cost loop & bass octave
+    // selection can query the cache for matching entries.
+    currentFunctionId = (degree >= 1 && degree <= 7) ? degree : -1;
+    ageVoicingCache();
+
+   #if JUCE_DEBUG
+    {
+        int matches = 0;
+        for (int i = 0; i < cacheSize; ++i)
+            if (voicingCache[(size_t) i].functionId == currentFunctionId) ++matches;
+        DBG ("voicingCache read: deg=" + juce::String (degree)
+             + " size=" + juce::String (cacheSize)
+             + " matches=" + juce::String (matches)
+             + " decay=" + juce::String (0.05f + colorAmount * 0.45f, 3));
+    }
+   #endif
+
+    // First-chord fallback only. We no longer snap to canonical on the I
+    // chord — returning to tonic should voice-lead smoothly from whatever
+    // the predecessor was, not reset to a fixed stack.
+    if (!voiceCountSet || prevVoices.empty())
         return placeNearRegister (chordTones, targetRegisterCenter);
 
-    // Voice 1: root — nearest octave to previous bass
+    // Pass 2: per-voice cache hints. The most-recent cached entry for the
+    // current function provides 4 sorted MIDI targets — one per voice.
+    // Both prev and cached voicings are stored sorted, so voice index v
+    // in current corresponds to voice v in cached.
+    const CachedVoicing* cached = findRecentCachedEntry (currentFunctionId);
+    const float decayRate = 0.05f + colorAmount * 0.45f;
+    const float cacheWeight = cached ? std::exp (-cached->ageInChords * decayRate) : 0.0f;
+    const int cachedBass = cached ? cached->voicing[0] : -1;
+
+    // Voice 1: root — cache-aware octave selection (cap + pull when
+    // cached entry exists, drift-aware tiebreaker otherwise).
     int prevBass = prevVoices.front();
-    int bassNote = findNearestOctave (rootPC, prevBass, 24, 72);
+    int bassNote = findNearestOctaveDriftAware (rootPC, prevBass, 24, 72, cachedBass, cacheWeight);
 
     // Get 3 required upper pitch classes
     auto upperPCs = getUpperPCs (chordTones);
@@ -447,6 +733,11 @@ std::vector<int> HarmonyEngine::getBestInversion (
         prevUpper.push_back (prevUpper.empty() ? bassNote + 7 : prevUpper.back() + 4);
     prevUpper.resize (3);
 
+    // Per-voice upper cache hints (cached.voicing[1..3]) or -1 each.
+    int upperHint[3] = { -1, -1, -1 };
+    if (cached)
+        for (int v = 0; v < 3; ++v) upperHint[v] = cached->voicing[v + 1];
+
     // Try all 6 permutations of 3 PCs → find minimum total movement
     int idx[3] = { 0, 1, 2 };
     int bestPerm[3] = { 0, 1, 2 };
@@ -458,7 +749,9 @@ std::vector<int> HarmonyEngine::getBestInversion (
         for (int v = 0; v < 3; ++v)
         {
             int pc = upperPCs[(size_t) idx[v]];
-            notes[v] = findNearestOctave (pc, prevUpper[(size_t) v], bassNote + 1, 84);
+            notes[v] = findNearestOctaveDriftAware (pc, prevUpper[(size_t) v],
+                                                     bassNote + 1, 84,
+                                                     upperHint[v], cacheWeight);
             cost += (float) std::abs (notes[v] - prevUpper[(size_t) v]);
         }
         // Penalize voice crossing
@@ -479,6 +772,16 @@ std::vector<int> HarmonyEngine::getBestInversion (
             else          cost += gStr * 0.5f;
         }
 
+        // Cache attraction — pulls candidate toward voicings of the same
+        // function from earlier in the progression, weighted by recency
+        // (decay rate driven by color knob). Compares the sorted 4-voice
+        // candidate against the sorted cached entries voice-by-voice.
+        {
+            int cand[4] = { bassNote, notes[0], notes[1], notes[2] };
+            std::sort (cand, cand + 4);
+            cost += computeAttractionDelta (cand);
+        }
+
         if (cost < (float) bestCost)
         {
             bestCost = cost;
@@ -493,7 +796,9 @@ std::vector<int> HarmonyEngine::getBestInversion (
     for (int v = 0; v < 3; ++v)
     {
         int pc = upperPCs[(size_t) bestPerm[v]];
-        int note = findNearestOctave (pc, prevUpper[(size_t) v], bassNote + 1, 84);
+        int note = findNearestOctaveDriftAware (pc, prevUpper[(size_t) v],
+                                                 bassNote + 1, 84,
+                                                 upperHint[v], cacheWeight);
         result.push_back (note);
     }
 
@@ -574,6 +879,7 @@ void HarmonyEngine::resetVoiceLeadingState()
     recentMidpoints.clear();
     currentDrift = 0.0f;
     targetRegisterCenter = getMoodRegisterTarget (currentMood);
+    clearVoicingCache();
 }
 
 std::vector<int> HarmonyEngine::clampToRange (std::vector<int> notes)

@@ -224,6 +224,27 @@ public:
     void triggerPadFromUI (int padIndex);
     void releasePadFromUI (int padIndex);
 
+    // ── SAMPLE-mode global playback ───────────────────────────────────────
+    // These are the primary sample-mode triggers — used by the spacebar, the
+    // PLAY pill, the waveform click, and any incoming MIDI note while in
+    // SAMPLE mode. midiNote 60 (C4) is treated as the root pitch, so a C4
+    // plays back at 1.0x speed with no semitone offset; other notes pitch up
+    // or down relative to C4.
+    static constexpr int kSampleModeRootMidi = 60;
+    void triggerSamplePlayback (int midiNote);
+
+    // Drop the playhead at a specific position inside the loaded sample
+    // before starting playback. Used by the waveform click so playback
+    // begins where the user clicked. normalizedPosition is [0..1] across the
+    // full sample buffer.
+    void triggerSamplePlaybackFromPosition (int midiNote, float normalizedPosition);
+
+    void stopSamplePlayback();
+
+    // Reflects whether the sample player has any voice still sounding; the
+    // PLAY pill polls this to flip between PLAY and STOP labels.
+    bool isSamplePlaybackActive() const { return samplePlayer.isAnyVoiceActive(); }
+
 private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (PresaProcessor)
 };

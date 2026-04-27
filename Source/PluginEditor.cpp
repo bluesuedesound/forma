@@ -17,6 +17,69 @@ static juce::Colour lerpColour (juce::Colour a, juce::Colour b, float t)
     return a.interpolatedWith (b, juce::jlimit (0.0f, 1.0f, t));
 }
 
+// ─── Lofi palette additions (kept local; the namespace-C palette stays
+// load-bearing for legacy controls). ───
+namespace LofiC {
+    const juce::Colour BG_DEEP    (0xFF0C0805);
+    const juce::Colour BG_BASE    (0xFF14100C);
+    const juce::Colour AMBER      (0xFFD97A3C);
+    const juce::Colour AMBER_SOFT (0xFFB85A26);
+    const juce::Colour AMBER_HOT  (0xFFF0A060);
+    const juce::Colour DEEP_RED   (0xFF5A1F10);
+    const juce::Colour INK_HERO   (0xFFF0E0C8);
+}
+
+// ─── Grain texture — built once in the editor ctor, tiled at low opacity. ───
+
+void FormaEditor::buildGrainTile()
+{
+    constexpr int N = 256;
+    grainTile = juce::Image (juce::Image::ARGB, N, N, true);
+    juce::Random rng (0xF09A4B12);  // deterministic seed
+    juce::Image::BitmapData bd (grainTile, juce::Image::BitmapData::writeOnly);
+    for (int y = 0; y < N; ++y)
+    {
+        for (int x = 0; x < N; ++x)
+        {
+            // Warm-tinted noise: weighted toward amber/brown, away from cool grey.
+            float v = rng.nextFloat();
+            // Bias the brightness curve so most pixels are dim with rare bright specks.
+            v = v * v;
+            // Channel weights that read brown/amber rather than neutral grey.
+            juce::uint8 r = (juce::uint8) juce::jlimit (0, 255, (int) (v * 220.0f));
+            juce::uint8 grn = (juce::uint8) juce::jlimit (0, 255, (int) (v * 150.0f));
+            juce::uint8 b = (juce::uint8) juce::jlimit (0, 255, (int) (v * 90.0f));
+            // Modulated alpha — most pixels are fully transparent or near-zero,
+            // sprinkled bright grains punctuate. Real overlay opacity is controlled
+            // by the caller; here we just set per-pixel weight.
+            juce::uint8 a = (juce::uint8) juce::jlimit (0, 255, (int) (v * 255.0f));
+            bd.setPixelColour (x, y, juce::Colour::fromRGBA (r, grn, b, a));
+        }
+    }
+}
+
+void FormaEditor::drawGrainOverlay (juce::Graphics& g, juce::Rectangle<int> area, float opacity)
+{
+    if (! grainTile.isValid()) return;
+    juce::Graphics::ScopedSaveState ss (g);
+    g.reduceClipRegion (area);
+    auto fa = (float) juce::jlimit (0.0f, 1.0f, opacity);
+    g.setOpacity (fa);
+    const int N = grainTile.getWidth();
+    for (int y = area.getY(); y < area.getBottom(); y += N)
+        for (int x = area.getX(); x < area.getRight(); x += N)
+            g.drawImageAt (grainTile, x, y);
+    g.setOpacity (1.0f);
+}
+
+bool FormaEditor::anyPillAnimating() const
+{
+    for (int i = 0; i < 7; ++i)
+        if (pillAnim[i].state == PillAnim::State::Flashing)
+            return true;
+    return false;
+}
+
 // ══════════════════���════════════════════════════��═════════════════════════
 // CONSTRUCTOR
 // ══════════��════════════════��═════════════════════���═══════════════════════
@@ -25,10 +88,12 @@ FormaEditor::FormaEditor (FormaProcessor& p)
     : AudioProcessorEditor (&p), proc (p)
 {
     setSize (780, 564);
-    currentOutputMode = proc.outputMode.load();
     currentSyncMode = proc.syncMode.load();
     currentBgColor = juce::Colour (kMoods[0].bgColor);
     targetBgColor  = currentBgColor;
+
+    // Build grain tile once. 256x256, tile-able, warm-tinted.
+    buildGrainTile();
 
     // Load XY dot from processor
     dotX = proc.xyDotX.load();
@@ -44,6 +109,13 @@ FormaEditor::FormaEditor (FormaProcessor& p)
     updateWaveVelocities (0);
 
     updateChordLabels();
+
+    // Rehydrate all UI mirror state from the processor. Without this the
+    // bass pattern grid and arp step grid (and every other mirrored control)
+    // would show their struct defaults every time the UI is closed and
+    // reopened, even though the audio state is intact.
+    syncUIFromProcessor();
+
     startTimerHz (60);
 }
 
@@ -98,8 +170,26 @@ void FormaEditor::timerCallback()
     int deg = proc.activeDegree.load();
     if (deg != lastDegree)
     {
+        const double now = juce::Time::getMillisecondCounterHiRes();
         for (int i = 0; i < 7; ++i)
-            chords[i].pressed = (i + 1 == deg);
+        {
+            bool isActive = (i + 1 == deg);
+            chords[i].pressed = isActive;
+
+            // Pill state machine: when a pill becomes the active degree,
+            // start the chord-name flash animation. When it leaves active,
+            // either return to Resting (if no flash pending) or let the
+            // flash finish (timer drives the transition below).
+            if (isActive && pillAnim[i].state != PillAnim::State::Flashing)
+            {
+                pillAnim[i].state = PillAnim::State::Flashing;
+                pillAnim[i].flashStartMs = now;
+            }
+            else if (! isActive && pillAnim[i].state == PillAnim::State::Active)
+            {
+                pillAnim[i].state = PillAnim::State::Resting;
+            }
+        }
         lastDegree = deg;
 
         for (int i = 0; i < 7; ++i) { chords[i].sug1 = false; chords[i].sug2 = false; }
@@ -114,9 +204,22 @@ void FormaEditor::timerCallback()
         statusChord = (deg >= 1 && deg <= 7) ? proc.currentChordName : juce::String ("Ready");
     }
 
+    // Advance the flash state machine.
+    {
+        const double now = juce::Time::getMillisecondCounterHiRes();
+        for (int i = 0; i < 7; ++i)
+        {
+            if (pillAnim[i].state == PillAnim::State::Flashing
+                && (now - pillAnim[i].flashStartMs) > 1100.0)
+            {
+                pillAnim[i].state = chords[i].pressed ? PillAnim::State::Active
+                                                     : PillAnim::State::Resting;
+            }
+        }
+    }
+
     // ── Thermal wave animation ──
     lastKnownDeg = deg;
-    lastKnownArp = proc.lastArpNote.load();
 
     // Update wave phases
     int moodI = proc.harmonyEngine.getCurrentMoodIndex();
@@ -215,18 +318,6 @@ void FormaEditor::setMood (int idx)
     proc.harmonyEngine.setMood (HarmonyEngine::moodNames[idx]);
     proc.applyMoodDefaults (idx);
 
-    // Sync editor state from processor
-    arpGateVal = proc.arpGateParam.load();
-    bassAlt    = proc.bassAltParam.load();
-    bassOn     = proc.bassEnabledParam.load();
-
-    float r = proc.arpRate.load();
-    if      (r >= 1.5f)  arpRate = 2;
-    else if (r >= 0.75f) arpRate = 1;
-    else                 arpRate = 0;
-
-    arpPattern = (int) proc.arpeggiator.getPattern();
-
     // Start XY dot transition
     targetDotX = proc.feelAmount.load();
     targetDotY = 1.0f - proc.colorAmount.load();
@@ -274,27 +365,18 @@ void FormaEditor::syncUIFromProcessor()
     glowX = dotX;
     glowY = dotY;
 
-    // Bass
-    bassOn  = proc.bassEnabledParam.load();
-    bassAlt = proc.bassAltParam.load();
-    bassOct = proc.octaveBassParam.load();
-    bassTrig     = proc.bassTriggerModeParam.load();
-    bassTrigNote = juce::jlimit (0, 127, proc.bassTriggerNoteParam.load());
+    // Voice toggles
+    chordsEnabledUI = proc.chordsEnabled.load();
+    bassEnabledUI   = proc.bassEnabled.load();
 
-    // Arp
-    arpOnState = proc.arpEnabled.load();
-    arpPattern = (int) proc.arpeggiator.getPattern();
-    float r = proc.arpeggiator.getRate();
-    if      (r >= 1.5f)  arpRate = 2;
-    else if (r >= 0.75f) arpRate = 1;
-    else                 arpRate = 0;
-    arpGateVal = proc.arpeggiator.getGate();
-    arpSpread  = proc.arpeggiator.getSpread() - 1;  // 1->0, 2->1
-    arpOct     = proc.arpeggiator.getOctaveOffset();
+    // Bass controls
+    bassOct         = proc.octaveBassParam.load();
+    bassModeUI      = juce::jlimit (0, 2, proc.bassMode.load());
+    bassTrigNoteUI  = juce::jlimit (0, 127, proc.bassTriggerNoteParam.load());
+    bassVariationUI = proc.bassVariationAmount.load();
 
-    // Output/Sync
-    currentOutputMode = proc.outputMode.load();
-    currentSyncMode   = proc.syncMode.load();
+    // Sync
+    currentSyncMode = proc.syncMode.load();
 
     // Sound + voicing
     currentSoundPreset = proc.currentSoundPreset.load();
@@ -319,25 +401,27 @@ void FormaEditor::syncUIFromProcessor()
 
 void FormaEditor::paint (juce::Graphics& g)
 {
-    leftCol   = juce::Rectangle<int> (0, 40, 155, 500);
-    centerCol = juce::Rectangle<int> (155, 40, 625, 500);
+    // Three-column layout: mood list (left), chord interface (center),
+    // voice toggles + bass section (right).
+    leftCol    = juce::Rectangle<int> (0,   40, 155, 500);
+    centerCol  = juce::Rectangle<int> (155, 40, 465, 500);
+    rightCol   = juce::Rectangle<int> (620, 40, 160, 500);
 
-    // XY compass container (380x380 centered in circle area which is top 320px of center)
-    int circleAreaH = centerCol.getHeight() - 180; // 320px for circle area
-    int compSize = 380;
+    // XY compass container centered in centerCol's top half.
+    int circleAreaH = centerCol.getHeight() - 180;  // top zone = 320 px
+    int compSize = 320;
     int compX = centerCol.getX() + (centerCol.getWidth() - compSize) / 2;
     int compY = centerCol.getY() + (circleAreaH - compSize) / 2;
     compassContainer = juce::Rectangle<int> (compX, compY, compSize, compSize);
 
-    // XY pad circle: 280x280 centered in compass container (50px margin for labels)
-    int padSize = 280;
+    int padSize = 240;
     int padX = compassContainer.getCentreX() - padSize / 2;
     int padY = compassContainer.getCentreY() - padSize / 2;
     xyPadCircle = juce::Rectangle<int> (padX, padY, padSize, padSize);
 
-    // Chord keys: 7 equal width, gap=5, in bottom 180px of center
+    // Chord keys: 7 equal width across the bottom of centerCol.
     int ckY = centerCol.getY() + circleAreaH;
-    int ckH = 160;
+    int ckH = 154;
     int ckGap = 5;
     int ckTotalW = centerCol.getWidth();
     int ckW = (ckTotalW - ckGap * 6) / 7;
@@ -346,13 +430,17 @@ void FormaEditor::paint (juce::Graphics& g)
 
     g.fillAll (BG4);
 
-    drawTopBar (g);
-    drawLeftCol (g);
-    drawCenter (g);
+    drawTopBar   (g);
+    drawLeftCol  (g);
+    drawCenter   (g);
+    drawRightCol (g);
     drawStatusBar (g);
 
     if (advancedVisible)
         drawAdvanced (g);
+
+    // Whole-UI grain overlay — last so it falls on every surface uniformly.
+    drawGrainOverlay (g, getLocalBounds(), 0.04f);
 }
 
 // ════════════════════════════════��════════════════════════════════════════
@@ -596,11 +684,11 @@ void FormaEditor::drawCenter (juce::Graphics& g)
 
     drawXYPad (g);
 
-    // Chord keys divider
     int circleAreaH = centerCol.getHeight() - 180;
     int divY = centerCol.getY() + circleAreaH;
     g.setColour (BORDER);
-    g.drawHorizontalLine (divY, (float) centerCol.getX(), (float) centerCol.getRight());
+    g.drawHorizontalLine (divY, (float) centerCol.getX(),
+                          (float) centerCol.getRight());
 
     for (int i = 0; i < 7; ++i)
         drawChordKey (g, chordKeyRects[i], i);
@@ -695,23 +783,33 @@ void FormaEditor::drawThermalCircle (juce::Graphics& g, juce::Point<float> centr
     float dpx = cx + dotNX * radius * 0.68f;
     float dpy = cy - dotNY * radius * 0.68f;
 
-    // 1. Background
-    g.setColour (juce::Colour (mt.voidCol));
+    // 1. Deep base — almost-black warm well.
+    g.setColour (LofiC::BG_DEEP);
     g.fillEllipse (cx - radius, cy - radius, radius * 2.0f, radius * 2.0f);
 
-    // 2. Thermal gradient from dot outward
-    float vdist = std::sqrt ((dpx - cx) * (dpx - cx) + (dpy - cy) * (dpy - cy));
-    float gR = radius + vdist * 0.8f + radius * 0.15f;
+    // 2. Posterized thermal — 3 discrete radial layers centered on the dot.
+    //    Each is a coloured radial gradient that fades to fully-transparent;
+    //    layered they read as soft posterized warmth without a per-frame blur.
+    auto fillRadial = [&] (juce::Colour col, float extentRatio, float alpha)
+    {
+        float ext = juce::jmax (radius * extentRatio, 1.0f);
+        juce::ColourGradient grad (col.withAlpha (alpha),     { dpx, dpy },
+                                   col.withAlpha (0.0f),       { dpx + ext, dpy }, true);
+        // Soft mid-stops to fake the blur without an offscreen image.
+        grad.addColour (0.40, col.withAlpha (alpha * 0.85f));
+        grad.addColour (0.70, col.withAlpha (alpha * 0.30f));
+        g.setGradientFill (grad);
+        g.fillEllipse (cx - radius, cy - radius, radius * 2.0f, radius * 2.0f);
+    };
 
-    juce::ColourGradient grad (juce::Colour (mt.voidCol), { dpx, dpy },
-                                juce::Colour (mt.edge), { dpx + gR, dpy }, true);
-    grad.addColour (0.10, juce::Colour (mt.inner));
-    grad.addColour (0.26, juce::Colour (mt.mid1));
-    grad.addColour (0.48, juce::Colour (mt.mid2));
-    grad.addColour (0.70, juce::Colour (mt.outer));
-    grad.addColour (0.90, juce::Colour (mt.edge));
-    g.setGradientFill (grad);
-    g.fillEllipse (cx - radius, cy - radius, radius * 2.0f, radius * 2.0f);
+    // Layer 1: deep red base, wide.
+    fillRadial (LofiC::DEEP_RED,   2.4f, 1.00f);
+    // Mood-tinted mid layer for variety across moods (optional, low alpha).
+    fillRadial (juce::Colour (mt.mid2), 1.6f, 0.45f);
+    // Layer 2: amber core.
+    fillRadial (LofiC::AMBER,      0.85f, 0.70f);
+    // Layer 3: hot center.
+    fillRadial (LofiC::AMBER_HOT,  0.32f, 0.80f);
 
     // 3. Void shape
     constexpr int VP = 128;
@@ -777,14 +875,34 @@ void FormaEditor::drawThermalCircle (juce::Graphics& g, juce::Point<float> centr
 
 void FormaEditor::drawThermalDot (juce::Graphics& g, float dpx, float dpy)
 {
-    auto& mt = kMoodThermals[juce::jlimit (0, kNumMoods - 1, currentThermalIdx)];
-    g.setColour (juce::Colour (0xFF060504));
-    g.fillEllipse (dpx - 5.0f, dpy - 5.0f, 10.0f, 10.0f);
-    g.setColour (juce::Colour (mt.dotStroke));
-    juce::Path dp; dp.addEllipse (dpx - 5.0f, dpy - 5.0f, 10.0f, 10.0f);
-    g.strokePath (dp, juce::PathStrokeType (1.2f));
-    g.setColour (juce::Colour (mt.dotStroke).withAlpha (0.55f));
-    g.fillEllipse (dpx - 1.2f, dpy - 1.2f, 2.4f, 2.4f);
+    // Amber halo: multiple draws at decreasing alpha and increasing radius
+    // for a soft glow falloff.
+    const auto amber = LofiC::AMBER;
+    struct Halo { float r; float a; };
+    static const Halo halos[] = {
+        { 18.0f, 0.06f },
+        { 13.0f, 0.10f },
+        {  9.0f, 0.18f },
+        {  7.0f, 0.30f },
+    };
+    for (const auto& h : halos)
+    {
+        g.setColour (amber.withAlpha (h.a));
+        g.fillEllipse (dpx - h.r, dpy - h.r, h.r * 2.0f, h.r * 2.0f);
+    }
+
+    // Body: 14px circle, deep-bg fill, 2px amber stroke.
+    constexpr float dotRad = 7.0f;
+    g.setColour (LofiC::BG_DEEP);
+    g.fillEllipse (dpx - dotRad, dpy - dotRad, dotRad * 2.0f, dotRad * 2.0f);
+    g.setColour (amber);
+    juce::Path dp;
+    dp.addEllipse (dpx - dotRad, dpy - dotRad, dotRad * 2.0f, dotRad * 2.0f);
+    g.strokePath (dp, juce::PathStrokeType (2.0f));
+
+    // Tiny hot specular speck.
+    g.setColour (LofiC::AMBER_HOT.withAlpha (0.85f));
+    g.fillEllipse (dpx - 1.4f, dpy - 1.4f, 2.8f, 2.8f);
 }
 
 
@@ -845,9 +963,22 @@ void FormaEditor::drawXYPad (juce::Graphics& g)
         juce::Graphics::ScopedSaveState ss (g);
         g.reduceClipRegion (clipPath);
         drawThermalCircle (g, { cx, cy }, rad);
+
+        // Lofi grain inside the pad — gives the thermal an analog texture.
+        drawGrainOverlay (g, r.toNearestInt(), 0.18f);
+
+        // Vignette: dark ring at the outer edge pushing focus toward center.
+        juce::ColourGradient vignette (juce::Colour::fromFloatRGBA (0, 0, 0, 0.0f),
+                                       { cx, cy },
+                                       juce::Colour::fromFloatRGBA (0, 0, 0, 0.55f),
+                                       { cx + rad, cy }, true);
+        vignette.addColour (0.55, juce::Colour::fromFloatRGBA (0, 0, 0, 0.0f));
+        vignette.addColour (0.80, juce::Colour::fromFloatRGBA (0, 0, 0, 0.18f));
+        g.setGradientFill (vignette);
+        g.fillEllipse (r);
     }
 
-    // Dot outside clip scope — sits on ring
+    // Dot outside clip scope — sits on the ring with an amber halo.
     {
         float dnx = dotX * 2.0f - 1.0f;
         float dny = -((dotY * 2.0f) - 1.0f);
@@ -868,83 +999,83 @@ void FormaEditor::drawXYPad (juce::Graphics& g)
 void FormaEditor::drawChordKey (juce::Graphics& g, juce::Rectangle<int> r, int idx)
 {
     auto& ch = chords[idx];
+    auto& anim = pillAnim[idx];
     float rad = 10.0f;
+    auto rf = r.toFloat();
+    bool isHovered = (idx == hoveredChordIdx && !ch.pressed);
+    bool isActive  = ch.pressed || anim.state == PillAnim::State::Active;
+    bool isFlashing = (anim.state == PillAnim::State::Flashing);
 
-    // Suggestion dots above top cap
+    // ── Suggestion dot (pulsing amber for primary, cool blue for secondary).
     if (ch.sug1)
     {
-        float sx = (float) r.getCentreX(), sy = (float)(r.getY() - 8);
-        float alpha = 0.6f + sugPulse * 0.4f;
-        g.setColour (SUGGEST1.withAlpha (alpha * 0.4f));
-        g.fillEllipse (sx - 8, sy - 8, 16, 16);
-        g.setColour (SUGGEST1.withAlpha (alpha));
+        float sx = (float) r.getRight() - 8.0f;
+        float sy = (float)(r.getY() + 8.0f);
+        float alpha = 0.55f + sugPulse * 0.45f;
+        g.setColour (LofiC::AMBER.withAlpha (alpha * 0.35f));
+        g.fillEllipse (sx - 7, sy - 7, 14, 14);
+        g.setColour (LofiC::AMBER.withAlpha (alpha));
         g.fillEllipse (sx - 3, sy - 3, 6, 6);
     }
     else if (ch.sug2)
     {
-        float sx = (float) r.getCentreX(), sy = (float)(r.getY() - 7);
-        g.setColour (SUGGEST2.withAlpha (0.8f));
+        float sx = (float) r.getRight() - 8.0f;
+        float sy = (float)(r.getY() + 8.0f);
+        g.setColour (SUGGEST2.withAlpha (0.75f));
         g.fillEllipse (sx - 3, sy - 3, 6, 6);
-        g.setColour (SUGGEST2.withAlpha (0.3f));
+        g.setColour (SUGGEST2.withAlpha (0.28f));
         g.fillEllipse (sx - 6, sy - 6, 12, 12);
     }
 
-    auto rf = r.toFloat();
-    bool isHovered = (idx == hoveredChordIdx && !ch.pressed);
-
-    if (ch.pressed)
+    // ── 1. Background: linear gradient bg-elev → bg-card with inset highlight.
     {
-        // Top cap pressed
-        auto cap = rf.withHeight (18);
-        g.setColour (juce::Colour (0xFF120F0D));
-        g.fillRoundedRectangle (cap, rad);
-        // Inset shadow on cap
-        juce::ColourGradient capInset (juce::Colour (0xE0000000), cap.getX(), cap.getY(),
-                                        juce::Colours::transparentBlack, cap.getX(), cap.getBottom(), false);
-        g.setGradientFill (capInset);
-        g.fillRoundedRectangle (cap, rad);
+        juce::ColourGradient bg (juce::Colour (0xFF20180F), rf.getX(), rf.getY(),
+                                 juce::Colour (0xFF1A1410), rf.getX(), rf.getBottom(), false);
+        g.setGradientFill (bg);
+        g.fillRoundedRectangle (rf, rad);
 
-        // Body
-        g.setColour (juce::Colour (0xFF2A2420));
-        g.fillRoundedRectangle (rf.withTrimmedTop (16), 5.0f);
-        g.setColour (juce::Colour (0xFF2A2420));
-        g.fillRect (rf.getX() + 1, rf.getY() + 14, rf.getWidth() - 2, 6.0f);
-
-        // Inset shadow on body
-        juce::ColourGradient inset (juce::Colour (0xB0000000), rf.getX(), rf.getY(),
-                                     juce::Colours::transparentBlack, rf.getX(), rf.getY() + 16, false);
-        g.setGradientFill (inset);
-        g.fillRoundedRectangle (rf.withHeight (18), rad);
-
-        // Outer glow
-        g.setColour (juce::Colour (0x26C8875A));
-        g.drawRoundedRectangle (rf.expanded (2), rad + 2, 2.0f);
-
-        g.setColour (ACCENT);
-        g.drawRoundedRectangle (rf, rad, 1.0f);
-    }
-    else
-    {
-        // Top cap idle/hover
-        auto cap = rf.withHeight (18);
-        g.setColour (juce::Colour (0xFF161412));
-        g.fillRoundedRectangle (cap, rad);
-
-        // Cap bottom border
-        g.setColour (juce::Colour (0xFF1E1C18));
-        g.drawHorizontalLine ((int)(rf.getY() + 17), rf.getX() + 4, rf.getRight() - 4);
-
-        // Body
-        g.setColour (isHovered ? juce::Colour (0xFF232018) : BG3);
-        g.fillRoundedRectangle (rf.withTrimmedTop (16), 5.0f);
-        g.setColour (isHovered ? juce::Colour (0xFF232018) : BG3);
-        g.fillRect (rf.getX() + 1, rf.getY() + 14, rf.getWidth() - 2, 6.0f);
-
-        g.setColour (isHovered ? juce::Colour (0xFF333028) : juce::Colour (0xFF262420));
-        g.drawRoundedRectangle (rf, rad, 1.0f);
+        // Subtle inset highlight along the top edge.
+        juce::ColourGradient topGloss (juce::Colour::fromFloatRGBA (1.0f, 0.92f, 0.78f, 0.05f),
+                                       rf.getX(), rf.getY(),
+                                       juce::Colour::fromFloatRGBA (0, 0, 0, 0.0f),
+                                       rf.getX(), rf.getY() + 12.0f, false);
+        g.setGradientFill (topGloss);
+        g.fillRoundedRectangle (rf.withHeight (12.0f), rad);
     }
 
-    // Quality stripe (left edge, 2px)
+    // Lofi grain inside the pill, masked to its rounded rect.
+    {
+        juce::Path clip;
+        clip.addRoundedRectangle (rf, rad);
+        juce::Graphics::ScopedSaveState ss (g);
+        g.reduceClipRegion (clip);
+        drawGrainOverlay (g, r, 0.12f);
+    }
+
+    // ── 2. Active glow: amber radial from the pill's bottom upward.
+    if (isActive)
+    {
+        juce::ColourGradient glow (LofiC::AMBER.withAlpha (0.25f),
+                                   rf.getCentreX(), rf.getBottom(),
+                                   LofiC::AMBER.withAlpha (0.0f),
+                                   rf.getCentreX(), rf.getBottom() - rf.getHeight() * 0.7f,
+                                   false);
+        g.setGradientFill (glow);
+        juce::Path clip;
+        clip.addRoundedRectangle (rf, rad);
+        juce::Graphics::ScopedSaveState ss (g);
+        g.reduceClipRegion (clip);
+        g.fillAll();
+    }
+
+    // Hover whisper (subtle).
+    if (isHovered)
+    {
+        g.setColour (juce::Colour::fromFloatRGBA (1.0f, 0.92f, 0.78f, 0.025f));
+        g.fillRoundedRectangle (rf, rad);
+    }
+
+    // ── 3. Quality stripe (left edge, 2px).
     if (ch.qual == Minor)
     { g.setColour (juce::Colour (0xFF2A2820)); g.fillRect (rf.getX() + 1, rf.getY() + 12, 2.0f, rf.getHeight() - 24); }
     else if (ch.qual == Diminished)
@@ -952,23 +1083,104 @@ void FormaEditor::drawChordKey (juce::Graphics& g, juce::Rectangle<int> r, int i
     else if (ch.qual == Augmented)
     { g.setColour (juce::Colour (0xFF2A4A5A)); g.fillRect (rf.getX() + 1, rf.getY() + 12, 2.0f, rf.getHeight() - 24); }
 
-    // Text — bottom aligned, pb=18px
+    // ── 4. Border + outer glow on active.
+    if (isActive)
+    {
+        g.setColour (LofiC::AMBER.withAlpha (0.20f));
+        g.drawRoundedRectangle (rf.expanded (2.0f), rad + 2.0f, 2.0f);
+        g.setColour (LofiC::AMBER);
+        g.drawRoundedRectangle (rf, rad, 1.2f);
+    }
+    else
+    {
+        g.setColour (isHovered ? juce::Colour (0xFF3A3528) : juce::Colour (0xFF2A1F15));
+        g.drawRoundedRectangle (rf, rad, 1.0f);
+    }
+
+    // ── 5. Text. Resting/Active = degree (roman) + chord name + quality.
+    //    Flashing = chord-name reveal animation: degree fades+slides up,
+    //    chord name slides+fades in, holds, then reverses for the last
+    //    third of the window.
     int textBot = r.getBottom() - 18;
+    int romanY = textBot - 36;
+    int nameY  = textBot - 22;
+    int qualY  = textBot - 2;
 
-    // Roman numeral
-    g.setFont (mono (9.0f));
-    g.setColour (ch.pressed ? juce::Colour (0xFF6B6760) : juce::Colour (0xFF2E2C28));
-    g.drawText (ch.roman, juce::Rectangle<int> (r.getX(), textBot - 36, r.getWidth(), 12), juce::Justification::centred);
+    auto easeOutCubic = [] (float t) {
+        t = juce::jlimit (0.0f, 1.0f, t);
+        float inv = 1.0f - t;
+        return 1.0f - inv * inv * inv;
+    };
 
-    // Chord name
-    g.setFont (sans (15.0f, true));
-    g.setColour (ch.pressed ? TXT_HI : juce::Colour (0xFF6A6660));
-    g.drawText (ch.name, juce::Rectangle<int> (r.getX(), textBot - 22, r.getWidth(), 18), juce::Justification::centred);
+    // Default text colors.
+    juce::Colour romanCol = isActive ? juce::Colour (0xFFA89880) : juce::Colour (0xFF6A5A48);
+    juce::Colour nameCol  = isActive ? LofiC::INK_HERO         : juce::Colour (0xFF8C7A65);
+    juce::Colour qualCol  = isActive ? juce::Colour (0xFF8C7A65) : juce::Colour (0xFF4A4035);
 
-    // Quality
-    g.setFont (mono (8.0f));
-    g.setColour (ch.pressed ? juce::Colour (0xFF6B6760) : TXT_DARK);
-    g.drawText (ch.qualLabel, juce::Rectangle<int> (r.getX(), textBot - 2, r.getWidth(), 12), juce::Justification::centred);
+    if (isFlashing)
+    {
+        const double now = juce::Time::getMillisecondCounterHiRes();
+        const float total = 1100.0f;
+        float p = juce::jlimit (0.0f, 1.0f, (float)((now - anim.flashStartMs) / total));
+
+        // Three sub-phases: 0..0.32 in, 0.32..0.68 hold, 0.68..1 out.
+        float tIn  = juce::jlimit (0.0f, 1.0f, p / 0.32f);
+        float tOut = juce::jlimit (0.0f, 1.0f, (p - 0.68f) / 0.32f);
+
+        float reveal;
+        if (p < 0.32f)      reveal = easeOutCubic (tIn);
+        else if (p > 0.68f) reveal = 1.0f - easeOutCubic (tOut);
+        else                reveal = 1.0f;
+
+        // Degree opacity / translate: 1 → 0 → 1, sliding up by 4 px in middle.
+        float degOpacity = 1.0f - reveal;
+        float degDy      = -4.0f * reveal;
+        // Chord-name reveal: opacity 0 → 1 → 0, sliding from below to above.
+        float nameOpacity = reveal;
+        float nameDy      = 4.0f * (1.0f - reveal);  // starts at +4, ends at 0 mid; then back to -4.
+        if (p > 0.5f) nameDy = -4.0f * (reveal - 0.5f) * 2.0f;
+
+        // Roman degree (faded out + drifting up).
+        g.setFont (mono (9.0f));
+        g.setColour (romanCol.withAlpha (degOpacity));
+        g.drawText (ch.roman,
+                    juce::Rectangle<int> (r.getX(), romanY + (int) degDy, r.getWidth(), 12),
+                    juce::Justification::centred);
+
+        // Chord name with reveal animation taking the spotlight.
+        g.setFont (sans (16.0f, true));
+        g.setColour (LofiC::INK_HERO.withAlpha (juce::jmax (nameOpacity, 0.75f)));
+        g.drawText (ch.name,
+                    juce::Rectangle<int> (r.getX(), nameY + (int) nameDy, r.getWidth(), 18),
+                    juce::Justification::centred);
+
+        // Quality fades along with the resting text.
+        g.setFont (mono (8.0f));
+        g.setColour (qualCol.withAlpha (degOpacity));
+        g.drawText (ch.qualLabel,
+                    juce::Rectangle<int> (r.getX(), qualY, r.getWidth(), 12),
+                    juce::Justification::centred);
+    }
+    else
+    {
+        g.setFont (mono (9.0f));
+        g.setColour (romanCol);
+        g.drawText (ch.roman,
+                    juce::Rectangle<int> (r.getX(), romanY, r.getWidth(), 12),
+                    juce::Justification::centred);
+
+        g.setFont (sans (15.0f, true));
+        g.setColour (nameCol);
+        g.drawText (ch.name,
+                    juce::Rectangle<int> (r.getX(), nameY, r.getWidth(), 18),
+                    juce::Justification::centred);
+
+        g.setFont (mono (8.0f));
+        g.setColour (qualCol);
+        g.drawText (ch.qualLabel,
+                    juce::Rectangle<int> (r.getX(), qualY, r.getWidth(), 12),
+                    juce::Justification::centred);
+    }
 }
 
 // ═════════════════════════════════════════════════════════════════════════
@@ -1119,23 +1331,17 @@ void FormaEditor::drawAdvanced (juce::Graphics& g)
     }
     py += 24;
 
-    // OUTPUT + SYNC (combined row)
+    // SYNC row (OUTPUT row removed — voice routing is now driven by the
+    // selected top-level tab, not by a separate toggle.)
     g.setFont (mono (8.0f));
     g.setColour (TXT_GHOST);
-    g.drawText ("OUTPUT", juce::Rectangle<int> (px, py, 50, 12), juce::Justification::centredLeft);
-    g.drawText ("SYNC", juce::Rectangle<int> (px + 290, py, 40, 12), juce::Justification::centredLeft);
+    g.drawText ("SYNC", juce::Rectangle<int> (px, py, 40, 12), juce::Justification::centredLeft);
     py += 13;
 
-    const char* outLabels[] = { "ALL", "CHORDS", "BASS", "ARP" };
-    for (int i = 0; i < 4; ++i)
-    {
-        advOutputPills[i] = juce::Rectangle<int> (px + i * 64, py, 58, 20);
-        drawPill (g, advOutputPills[i], outLabels[i], currentOutputMode == i);
-    }
     const char* syncLabels[] = { "FULL", "EXPR", "HARM", "FREE" };
     for (int i = 0; i < 4; ++i)
     {
-        advSyncPills[i] = juce::Rectangle<int> (px + 270 + i * 58, py, 52, 20);
+        advSyncPills[i] = juce::Rectangle<int> (px + i * 58, py, 52, 20);
         drawPill (g, advSyncPills[i], syncLabels[i], currentSyncMode == i);
     }
     py += 28;
@@ -1171,161 +1377,6 @@ void FormaEditor::drawAdvanced (juce::Graphics& g)
         g.drawText ("always on", tagR, juce::Justification::centred);
     }
     py += 36;
-
-    // BASS card
-    {
-        bool bassOpen = bassOn;
-        int cardH = bassOpen ? (bassTrig ? 96 : 70) : 30;
-        auto cardR = juce::Rectangle<int> (px, py, 520, cardH);
-        g.setColour (juce::Colour (0xFF1A1814));
-        g.fillRoundedRectangle (cardR.toFloat(), 6.0f);
-        g.setColour (bassOpen ? juce::Colour (0xFF2A2820) : BORDER);
-        g.drawRoundedRectangle (cardR.toFloat(), 6.0f, 1.0f);
-        g.setFont (mono (9.0f));
-        g.setColour (TXT_MID);
-        g.drawText ("BASS", cardR.withTrimmedLeft (12), juce::Justification::centredLeft);
-        advBassOnRect = juce::Rectangle<int> (px + 490, py + 7, 26, 15);
-        drawToggle (g, advBassOnRect, bassOn);
-
-        if (bassOpen)
-        {
-            int by = py + 34;
-            g.setFont (mono (9.0f));
-            g.setColour (juce::Colour (0xFF7A7670));
-            advBassOctMinRect = juce::Rectangle<int> (px + 46, by, 17, 17);
-            advBassOctPlRect  = juce::Rectangle<int> (px + 101, by, 17, 17);
-            drawStepper (g, juce::Rectangle<int> (px + 12, by, 120, 18), "OCT", bassOct);
-
-            g.drawText ("ALT", juce::Rectangle<int> (px + 160, by, 28, 15), juce::Justification::centredLeft);
-            advBassAltRect = juce::Rectangle<int> (px + 192, by, 26, 15);
-            drawToggle (g, advBassAltRect, bassAlt);
-
-            // MIDI TRIGGER toggle on the same row, right half of the card
-            g.setColour (juce::Colour (0xFF7A7670));
-            g.drawText ("MIDI TRIGGER",
-                        juce::Rectangle<int> (px + 260, by, 100, 15),
-                        juce::Justification::centredLeft);
-            advBassTrigToggleRect = juce::Rectangle<int> (px + 360, by, 26, 15);
-            drawToggle (g, advBassTrigToggleRect, bassTrig);
-
-            if (bassTrig)
-            {
-                // TRIGGER NOTE stepper: - [C-2] +  with label
-                int ty = by + 26;
-                auto stepR = juce::Rectangle<int> (px + 12, ty, 220, 17);
-
-                g.setFont (mono (9.0f));
-                g.setColour (juce::Colour (0xFF7A7670));
-                g.drawText ("TRIGGER NOTE",
-                            stepR.withWidth (100),
-                            juce::Justification::centredLeft);
-
-                auto minR = juce::Rectangle<int> (stepR.getX() + 110, ty, 17, 17);
-                g.setColour (BG2);
-                g.fillRoundedRectangle (minR.toFloat(), 3.0f);
-                g.setColour (BORDER);
-                g.drawRoundedRectangle (minR.toFloat(), 3.0f, 1.0f);
-                g.setFont (mono (10.0f));
-                g.setColour (juce::Colour (0xFF7A7670));
-                g.drawText ("-", minR, juce::Justification::centred);
-                advBassTrigNoteMinRect = minR;
-
-                auto valR = juce::Rectangle<int> (stepR.getX() + 131, ty, 50, 17);
-                g.setColour (BG4);
-                g.fillRoundedRectangle (valR.toFloat(), 2.0f);
-                g.setColour (BORDER);
-                g.drawRoundedRectangle (valR.toFloat(), 2.0f, 1.0f);
-                g.setFont (mono (11.0f));
-                g.setColour (juce::Colour (0xFFB8B4AB));
-                // Ableton-style note name: C-2 = MIDI 0, C3 = MIDI 60
-                static const char* const pcs[] = {
-                    "C","C#","D","D#","E","F","F#","G","G#","A","A#","B"
-                };
-                int n = juce::jlimit (0, 127, bassTrigNote);
-                juce::String noteStr = juce::String (pcs[n % 12]) + juce::String ((n / 12) - 2);
-                g.drawText (noteStr, valR, juce::Justification::centred);
-
-                auto plR = juce::Rectangle<int> (stepR.getX() + 185, ty, 17, 17);
-                g.setColour (BG2);
-                g.fillRoundedRectangle (plR.toFloat(), 3.0f);
-                g.setColour (BORDER);
-                g.drawRoundedRectangle (plR.toFloat(), 3.0f, 1.0f);
-                g.setFont (mono (10.0f));
-                g.setColour (juce::Colour (0xFF7A7670));
-                g.drawText ("+", plR, juce::Justification::centred);
-                advBassTrigNotePlRect = plR;
-            }
-        }
-        py += cardH + 6;
-    }
-
-    // ── ARP section ──
-    g.setColour (BORDER);
-    g.drawHorizontalLine (py, (float) px, (float)(px + 540));
-    py += 10;
-
-    g.setFont (mono (8.0f));
-    g.setColour (TXT_MID);
-    g.drawText ("ARP", juce::Rectangle<int> (px, py, 40, 12), juce::Justification::centredLeft);
-
-    // ON toggle (inline with label)
-    g.setFont (mono (9.0f));
-    g.setColour (juce::Colour (0xFF7A7670));
-    advArpOnRect = juce::Rectangle<int> (px + 40, py - 1, 26, 15);
-    drawToggle (g, advArpOnRect, arpOnState);
-    py += 16;
-
-    // MOTIF pills (2 rows of 3)
-    g.setFont (mono (8.0f));
-    g.setColour (TXT_GHOST);
-    g.drawText ("MOTIF", juce::Rectangle<int> (px, py, 50, 12), juce::Justification::centredLeft);
-    py += 13;
-
-    const char* motifs[] = { "Rise", "Cascade", "Pulse", "Groove", "Spiral", "Drift" };
-    for (int i = 0; i < 6; ++i)
-    {
-        int col2 = i % 3;
-        int row2 = i / 3;
-        advMotifPills[i] = juce::Rectangle<int> (px + col2 * 88, py + row2 * 22, 82, 18);
-        drawPill (g, advMotifPills[i], motifs[i], i == arpPattern);
-    }
-    py += 48;
-
-    // RATE + SPREAD + GATE + OCT (compact rows)
-    g.setFont (mono (8.0f));
-    g.setColour (TXT_GHOST);
-    g.drawText ("RATE", juce::Rectangle<int> (px, py, 40, 12), juce::Justification::centredLeft);
-    g.drawText ("SPREAD", juce::Rectangle<int> (px + 180, py, 50, 12), juce::Justification::centredLeft);
-    py += 13;
-
-    const char* rates[] = { "\xc2\xbd", "1", "2\xc3\x97" };
-    for (int i = 0; i < 3; ++i)
-    {
-        advRatePills[i] = juce::Rectangle<int> (px + i * 50, py, 44, 18);
-        drawPill (g, advRatePills[i], rates[i], i == arpRate);
-    }
-    const char* spreads[] = { "1", "2" };
-    for (int i = 0; i < 2; ++i)
-    {
-        advSpreadPills[i] = juce::Rectangle<int> (px + 180 + i * 40, py, 36, 18);
-        drawPill (g, advSpreadPills[i], spreads[i], arpSpread == i);
-    }
-
-    // GATE inline with rate/spread row
-    g.setColour (TXT_GHOST);
-    g.drawText ("GATE", juce::Rectangle<int> (px + 300, py - 13, 40, 12), juce::Justification::centredLeft);
-    advGateSlider = juce::Rectangle<int> (px + 300, py + 4, 130, 6);
-    drawMiniSlider (g, advGateSlider, arpGateVal);
-    g.setColour (TXT_MID);
-    g.drawText (juce::String ((int)(arpGateVal * 100)) + "%",
-                juce::Rectangle<int> (px + 436, py - 13, 40, 12), juce::Justification::centredLeft);
-    py += 24;
-
-    // ARP OCT stepper
-    advArpOctMinRect = juce::Rectangle<int> (px + 34, py, 17, 17);
-    advArpOctPlRect  = juce::Rectangle<int> (px + 89, py, 17, 17);
-    drawStepper (g, juce::Rectangle<int> (px, py, 120, 18), "OCT", arpOct);
-    py += 24;
 
     // ── SYNTH + SUGGESTIONS (combined row) ──
     g.setColour (BORDER);
@@ -1513,17 +1564,7 @@ void FormaEditor::mouseDown (const juce::MouseEvent& e)
             }
         }
 
-        // Output mode pills
-        for (int i = 0; i < 4; ++i)
-        {
-            if (advOutputPills[i].contains (pos))
-            {
-                currentOutputMode = i;  // 0=All, 1=Chords, 2=Bass, 3=Arp
-                proc.outputMode.store (currentOutputMode);
-                repaint();
-                return;
-            }
-        }
+        // (OUTPUT row removed — output routing is driven by the selected tab.)
 
         // Sync mode pills
         for (int i = 0; i < 4; ++i)
@@ -1537,127 +1578,10 @@ void FormaEditor::mouseDown (const juce::MouseEvent& e)
             }
         }
 
-        // Bass ON toggle
-        if (advBassOnRect.contains (pos))
-        {
-            bassOn = !bassOn;
-            proc.bassEnabledParam.store (bassOn);
-            repaint();
-            return;
-        }
-
-        // Bass ALT toggle
-        if (advBassAltRect.contains (pos))
-        {
-            bassAlt = !bassAlt;
-            proc.bassAltParam.store (bassAlt);
-            repaint();
-            return;
-        }
-
-        // Bass OCT stepper
-        // Chord OCT stepper
+        // Chord OCT stepper (only per-voice control still hosted here; the
+        // rest of the bass/arp per-voice UI has moved to the tabs).
         if (advChordOctMinRect.contains (pos) && chordOctVal > -2) { chordOctVal--; proc.octaveChordParam.store (chordOctVal); repaint(); return; }
         if (advChordOctPlRect.contains (pos)  && chordOctVal < 2)  { chordOctVal++; proc.octaveChordParam.store (chordOctVal); repaint(); return; }
-
-        if (advBassOctMinRect.contains (pos) && bassOct > -2) { bassOct--; proc.octaveBassParam.store (bassOct); repaint(); return; }
-        if (advBassOctPlRect.contains (pos)  && bassOct < 2)  { bassOct++; proc.octaveBassParam.store (bassOct); repaint(); return; }
-
-        // Bass MIDI TRIGGER toggle
-        if (advBassTrigToggleRect.contains (pos))
-        {
-            bassTrig = !bassTrig;
-            proc.bassTriggerModeParam.store (bassTrig);
-            repaint();
-            return;
-        }
-
-        // Bass TRIGGER NOTE stepper
-        if (advBassTrigNoteMinRect.contains (pos) && bassTrigNote > 0)
-        {
-            bassTrigNote--;
-            proc.bassTriggerNoteParam.store (bassTrigNote);
-            repaint();
-            return;
-        }
-        if (advBassTrigNotePlRect.contains (pos) && bassTrigNote < 127)
-        {
-            bassTrigNote++;
-            proc.bassTriggerNoteParam.store (bassTrigNote);
-            repaint();
-            return;
-        }
-
-        // Arp ON toggle
-        if (advArpOnRect.contains (pos))
-        {
-            arpOnState = !arpOnState;
-            proc.arpEnabled.store (arpOnState);
-            if (arpOnState && proc.activeDegree.load() >= 1)
-                proc.arpeggiator.setActive (true);
-            else if (!arpOnState)
-            {
-                proc.arpeggiator.setActive (false);
-                proc.arpeggiator.reset();
-            }
-            repaint();
-            return;
-        }
-
-        // Motif pills
-        for (int i = 0; i < 6; ++i)
-        {
-            if (advMotifPills[i].contains (pos))
-            {
-                arpPattern = i;
-                static const Arpeggiator::Pattern pats[] = {
-                    Arpeggiator::Pattern::Rise, Arpeggiator::Pattern::Cascade,
-                    Arpeggiator::Pattern::Pulse, Arpeggiator::Pattern::Groove,
-                    Arpeggiator::Pattern::Spiral, Arpeggiator::Pattern::Drift
-                };
-                proc.arpeggiator.setPattern (pats[i]);
-                repaint();
-                return;
-            }
-        }
-
-        // Rate pills
-        for (int i = 0; i < 3; ++i)
-        {
-            if (advRatePills[i].contains (pos))
-            {
-                arpRate = i;
-                static const float rateValues[] = { 0.5f, 1.0f, 2.0f };
-                proc.arpRate.store (rateValues[i]);
-                repaint();
-                return;
-            }
-        }
-
-        // Spread pills
-        for (int i = 0; i < 2; ++i)
-        {
-            if (advSpreadPills[i].contains (pos))
-            {
-                arpSpread = i;
-                proc.arpSpread.store (i + 1);
-                repaint();
-                return;
-            }
-        }
-
-        // Gate slider
-        if (advGateSlider.expanded (0, 8).contains (pos))
-        {
-            arpGateVal = juce::jlimit (0.0f, 1.0f, (float)(pos.x - advGateSlider.getX()) / (float) advGateSlider.getWidth());
-            proc.arpGateParam.store (arpGateVal);
-            repaint();
-            return;
-        }
-
-        // Arp OCT stepper
-        if (advArpOctMinRect.contains (pos) && arpOct > -2) { arpOct--; proc.arpOctave.store (arpOct); repaint(); return; }
-        if (advArpOctPlRect.contains (pos)  && arpOct < 2)  { arpOct++; proc.arpOctave.store (arpOct); repaint(); return; }
 
         // Synth vol slider
         if (advSynthSlider.expanded (0, 8).contains (pos))
@@ -1785,29 +1709,29 @@ void FormaEditor::mouseDown (const juce::MouseEvent& e)
     }
 
     // ── XY Pad (circular bounds) ──
-    float dx = (float)(pos.x - xyPadCircle.getCentreX());
-    float dy = (float)(pos.y - xyPadCircle.getCentreY());
-    float padRad = xyPadCircle.getWidth() * 0.5f;
-    if (dx * dx + dy * dy <= padRad * padRad)
     {
-        draggingDot = true;
-        // Normalize to -1..+1 then to circle-clamped 0..1
-        float nx = dx / padRad;
-        float ny = dy / padRad;
-        // Already inside circle (checked above)
-        dotX = (nx + 1.0f) * 0.5f;
-        dotY = (ny + 1.0f) * 0.5f;
-        float colorVal = 1.0f - dotY;
-        float feelVal  = dotX;
-        proc.colorAmount.store (colorVal);
-        proc.feelAmount.store (feelVal);
-        proc.harmonyEngine.setColorAmount (colorVal);
-        proc.driftAmount.store (proc.getDriftForMoodAndFeel (feelVal));
-        proc.xyDotX.store (dotX);
-        proc.xyDotY.store (dotY);
-        updateChordLabels();
-        repaint();
-        return;
+        float dx = (float)(pos.x - xyPadCircle.getCentreX());
+        float dy = (float)(pos.y - xyPadCircle.getCentreY());
+        float padRad = xyPadCircle.getWidth() * 0.5f;
+        if (dx * dx + dy * dy <= padRad * padRad)
+        {
+            draggingDot = true;
+            float nx = dx / padRad;
+            float ny = dy / padRad;
+            dotX = (nx + 1.0f) * 0.5f;
+            dotY = (ny + 1.0f) * 0.5f;
+            float colorVal = 1.0f - dotY;
+            float feelVal  = dotX;
+            proc.colorAmount.store (colorVal);
+            proc.feelAmount.store (feelVal);
+            proc.harmonyEngine.setColorAmount (colorVal);
+            proc.driftAmount.store (proc.getDriftForMoodAndFeel (feelVal));
+            proc.xyDotX.store (dotX);
+            proc.xyDotY.store (dotY);
+            updateChordLabels();
+            repaint();
+            return;
+        }
     }
 
     // ── Chord keys ──
@@ -1817,11 +1741,69 @@ void FormaEditor::mouseDown (const juce::MouseEvent& e)
         {
             pressedChordIdx = i;
             chords[i].pressed = true;
+            // Kick the flash immediately on click — don't wait for the
+            // processor's activeDegree atomic to round-trip through timer.
+            pillAnim[i].state = PillAnim::State::Flashing;
+            pillAnim[i].flashStartMs = juce::Time::getMillisecondCounterHiRes();
             proc.triggerChordFromEditor (i + 1);
             statusChord = proc.harmonyEngine.getChordName (i + 1);
             repaint();
             return;
         }
+    }
+
+    // ── Right column: CHORDS / BASS voice toggles ──
+    if (rightChordsToggleRect.contains (pos))
+    {
+        chordsEnabledUI = ! chordsEnabledUI;
+        proc.chordsEnabled.store (chordsEnabledUI);
+        repaint();
+        return;
+    }
+    if (rightBassToggleRect.contains (pos))
+    {
+        bassEnabledUI = ! bassEnabledUI;
+        proc.bassEnabled.store (bassEnabledUI);
+        repaint();
+        return;
+    }
+
+    // Bass mode pills
+    for (int i = 0; i < 3; ++i)
+    {
+        if (bassModePills[i].contains (pos))
+        {
+            bassModeUI = i;
+            proc.bassMode.store (i);
+            repaint();
+            return;
+        }
+    }
+
+    // Bass octave stepper
+    if (bassOctMinRect.contains (pos) && bassOct > -2)
+    {   bassOct--; proc.octaveBassParam.store (bassOct); repaint(); return; }
+    if (bassOctPlRect.contains (pos)  && bassOct < 2)
+    {   bassOct++; proc.octaveBassParam.store (bassOct); repaint(); return; }
+
+    // Trigger note stepper (only when bass mode uses triggers)
+    if (bassModeUI >= 1)
+    {
+        if (bassTrigNoteMinRect.contains (pos) && bassTrigNoteUI > 0)
+        {   bassTrigNoteUI--; proc.bassTriggerNoteParam.store (bassTrigNoteUI); repaint(); return; }
+        if (bassTrigNotePlRect.contains (pos) && bassTrigNoteUI < 127)
+        {   bassTrigNoteUI++; proc.bassTriggerNoteParam.store (bassTrigNoteUI); repaint(); return; }
+    }
+
+    // Variation slider (only in Kick + Variation mode)
+    if (bassModeUI == 2 && bassVariationSlider.expanded (0, 8).contains (pos))
+    {
+        float t = juce::jlimit (0.0f, 1.0f,
+            (float)(pos.x - bassVariationSlider.getX()) / (float) bassVariationSlider.getWidth());
+        bassVariationUI = t;
+        proc.bassVariationAmount.store (bassVariationUI);
+        repaint();
+        return;
     }
 
     // ── Key arrows ──
@@ -1888,12 +1870,6 @@ void FormaEditor::mouseDrag (const juce::MouseEvent& e)
     // Advanced overlay slider drags
     if (advancedVisible)
     {
-        if (advGateSlider.expanded (0, 12).contains (pos))
-        {
-            arpGateVal = juce::jlimit (0.0f, 1.0f, (float)(pos.x - advGateSlider.getX()) / (float) advGateSlider.getWidth());
-            proc.arpGateParam.store (arpGateVal);
-            repaint();
-        }
         if (advSynthSlider.expanded (0, 12).contains (pos))
         {
             synthVol = juce::jlimit (0.0f, 1.0f, (float)(pos.x - advSynthSlider.getX()) / (float) advSynthSlider.getWidth());
@@ -1914,3 +1890,147 @@ void FormaEditor::mouseUp (const juce::MouseEvent&)
     }
     draggingDot = false;
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// RIGHT COLUMN — voice toggles + compact bass section
+// ═══════════════════════════════════════════════════════════════════════════
+
+void FormaEditor::drawRightCol (juce::Graphics& g)
+{
+    g.setColour (BG2);
+    g.fillRect (rightCol);
+    g.setColour (BORDER);
+    g.drawVerticalLine (rightCol.getX(), (float) rightCol.getY(), (float) rightCol.getBottom());
+
+    const int px = rightCol.getX() + 14;
+    int py       = rightCol.getY() + 22;
+
+    // ── CHORDS toggle ──
+    g.setFont (mono (10.0f));
+    g.setColour (chordsEnabledUI ? TXT_HI : TXT_DIM);
+    g.drawText ("CHORDS", juce::Rectangle<int> (px, py, 70, 14), juce::Justification::centredLeft);
+    rightChordsToggleRect = juce::Rectangle<int> (rightCol.getRight() - 14 - 26, py, 26, 14);
+    drawToggle (g, rightChordsToggleRect, chordsEnabledUI);
+    py += 26;
+
+    // ── BASS toggle ──
+    g.setColour (bassEnabledUI ? TXT_HI : TXT_DIM);
+    g.drawText ("BASS", juce::Rectangle<int> (px, py, 70, 14), juce::Justification::centredLeft);
+    rightBassToggleRect = juce::Rectangle<int> (rightCol.getRight() - 14 - 26, py, 26, 14);
+    drawToggle (g, rightBassToggleRect, bassEnabledUI);
+    py += 28;
+
+    // Divider
+    g.setColour (BORDER);
+    g.drawHorizontalLine (py, (float)(rightCol.getX() + 10), (float)(rightCol.getRight() - 10));
+    py += 14;
+
+    // ── BASS section header ──
+    g.setFont (mono (8.0f));
+    g.setColour (TXT_GHOST);
+    g.drawText ("BASS", juce::Rectangle<int> (px, py, 80, 10), juce::Justification::centredLeft);
+    py += 14;
+
+    // Mode pills stacked vertically
+    static const char* modeNames[] = { "ROOT", "KICK TRIGGER", "KICK + VAR" };
+    const int pillW = rightCol.getWidth() - 28;
+    for (int i = 0; i < 3; ++i)
+    {
+        bassModePills[i] = juce::Rectangle<int> (px, py + i * 26, pillW, 22);
+        drawPill (g, bassModePills[i], modeNames[i], bassModeUI == i);
+    }
+    py += 3 * 26 + 8;
+
+    // OCT stepper
+    g.setFont (mono (8.0f));
+    g.setColour (TXT_GHOST);
+    g.drawText ("OCT", juce::Rectangle<int> (px, py, 40, 10), juce::Justification::centredLeft);
+    {
+        int sy = py + 12;
+        bassOctMinRect = juce::Rectangle<int> (px,      sy, 17, 17);
+        bassOctPlRect  = juce::Rectangle<int> (px + 55, sy, 17, 17);
+
+        g.setColour (BG4);
+        g.fillRoundedRectangle (bassOctMinRect.toFloat(), 3.0f);
+        g.setColour (BORDER);
+        g.drawRoundedRectangle (bassOctMinRect.toFloat(), 3.0f, 1.0f);
+        g.setFont (mono (10.0f));
+        g.setColour (TXT_MID);
+        g.drawText ("-", bassOctMinRect, juce::Justification::centred);
+
+        auto valR = juce::Rectangle<int> (px + 20, sy, 32, 17);
+        g.setColour (BG4);
+        g.fillRoundedRectangle (valR.toFloat(), 2.0f);
+        g.setColour (BORDER);
+        g.drawRoundedRectangle (valR.toFloat(), 2.0f, 1.0f);
+        g.setFont (mono (10.0f));
+        g.setColour (juce::Colour (0xFFB8B4AB));
+        juce::String vs = (bassOct > 0 ? "+" : "") + juce::String (bassOct);
+        g.drawText (vs, valR, juce::Justification::centred);
+
+        g.setColour (BG4);
+        g.fillRoundedRectangle (bassOctPlRect.toFloat(), 3.0f);
+        g.setColour (BORDER);
+        g.drawRoundedRectangle (bassOctPlRect.toFloat(), 3.0f, 1.0f);
+        g.setFont (mono (10.0f));
+        g.setColour (TXT_MID);
+        g.drawText ("+", bassOctPlRect, juce::Justification::centred);
+    }
+    py += 34;
+
+    // Trigger note (only in modes 1/2)
+    if (bassModeUI >= 1)
+    {
+        g.setFont (mono (8.0f));
+        g.setColour (TXT_GHOST);
+        g.drawText ("TRIGGER NOTE", juce::Rectangle<int> (px, py, 120, 10), juce::Justification::centredLeft);
+        int sy = py + 12;
+        bassTrigNoteMinRect = juce::Rectangle<int> (px,              sy, 17, 17);
+        bassTrigNotePlRect  = juce::Rectangle<int> (px + pillW - 17, sy, 17, 17);
+
+        g.setColour (BG4);
+        g.fillRoundedRectangle (bassTrigNoteMinRect.toFloat(), 3.0f);
+        g.setColour (BORDER);
+        g.drawRoundedRectangle (bassTrigNoteMinRect.toFloat(), 3.0f, 1.0f);
+        g.setFont (mono (10.0f));
+        g.setColour (TXT_MID);
+        g.drawText ("-", bassTrigNoteMinRect, juce::Justification::centred);
+
+        auto valR = juce::Rectangle<int> (px + 20, sy, pillW - 40, 17);
+        g.setColour (BG4);
+        g.fillRoundedRectangle (valR.toFloat(), 2.0f);
+        g.setColour (BORDER);
+        g.drawRoundedRectangle (valR.toFloat(), 2.0f, 1.0f);
+        g.setFont (mono (10.0f));
+        g.setColour (juce::Colour (0xFFB8B4AB));
+        static const char* const pcs[] = { "C","C#","D","D#","E","F","F#","G","G#","A","A#","B" };
+        int n = juce::jlimit (0, 127, bassTrigNoteUI);
+        juce::String noteStr = juce::String (pcs[n % 12]) + juce::String ((n / 12) - 2);
+        g.drawText (noteStr, valR, juce::Justification::centred);
+
+        g.setColour (BG4);
+        g.fillRoundedRectangle (bassTrigNotePlRect.toFloat(), 3.0f);
+        g.setColour (BORDER);
+        g.drawRoundedRectangle (bassTrigNotePlRect.toFloat(), 3.0f, 1.0f);
+        g.setFont (mono (10.0f));
+        g.setColour (TXT_MID);
+        g.drawText ("+", bassTrigNotePlRect, juce::Justification::centred);
+
+        py += 34;
+    }
+
+    // Variation slider (only in mode 2)
+    if (bassModeUI == 2)
+    {
+        g.setFont (mono (8.0f));
+        g.setColour (TXT_GHOST);
+        g.drawText ("VARIATION", juce::Rectangle<int> (px, py, 80, 10), juce::Justification::centredLeft);
+        g.setColour (TXT_MID);
+        g.drawText (juce::String ((int)(bassVariationUI * 100)) + "%",
+                    juce::Rectangle<int> (px + pillW - 40, py, 40, 10),
+                    juce::Justification::centredRight);
+        bassVariationSlider = juce::Rectangle<int> (px, py + 14, pillW, 6);
+        drawMiniSlider (g, bassVariationSlider, bassVariationUI);
+    }
+}
+

@@ -73,8 +73,8 @@ target_sources(Forma PRIVATE
     Source/PluginEditor.cpp
     Source/HarmonyEngine.cpp
     Source/HarmonyEngine.h
-    Source/Arpeggiator.cpp
-    Source/Arpeggiator.h
+    Source/BassEngine.cpp
+    Source/BassEngine.h
     Source/SuggestionEngine.cpp
     Source/SuggestionEngine.h
 )
