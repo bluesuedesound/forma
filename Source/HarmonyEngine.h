@@ -126,7 +126,8 @@ private:
     std::vector<int> getUpperPCs (const std::vector<int>& chordTones);
     int findNearestOctave (int pc, int target, int lo, int hi);
     int findNearestOctaveDriftAware (int pc, int target, int lo, int hi,
-                                      int cacheHint = -1, float cacheWeight = 0.0f);
+                                      int cacheHint = -1, float cacheWeight = 0.0f,
+                                      int registerTarget = -1);
 
     void buildScale();
     std::vector<int> voice (const std::vector<int>& notes);

@@ -450,24 +450,33 @@ int HarmonyEngine::findNearestOctave (int pc, int target, int lo, int hi)
 
 // Octave selector with two modes:
 //
-//   No cache (cacheHint < 0 or cacheWeight <= 0): drift-aware tiebreaker
-//   from Pass 1 / F+C+D. Among candidates within slack of the strict-nearest
-//   distance, pick the octave whose direction best opposes currentDrift.
+//   Pass 1 (no cache or stale cache, weight < 0.1): drift-aware tiebreaker
+//   from F+C+D. Among candidates inside an absolute window from prev
+//   (widened by drift), pick using cost = smooth + α·|c - registerTarget|
+//   for bass, or original drift-sign tiebreaker for uppers.
 //
-//   With cache (Pass 2): the candidate set is the octaves of pc within
-//   ±12 of target and legal range, plus the cached octave when it lies
-//   within an `effectiveCap` window around target. Each candidate is
-//   scored by `smoothness + pull`, where pull = |c - cacheHint| · weight ·
-//   cachePullWeight. The cap depends on weight (recency strength) and
-//   color (jazz-ness): 12 / 7 / 4 for weight ≥ 0.5 / ≥ 0.2 / else,
-//   attenuated by color, floor 4. The cap controls reachability of the
-//   cached octave when it's outside the smoothness ±12 window — within
-//   ±12 it's a candidate regardless and the pull does the work.
+//   Pass 2 (live cache, weight ≥ 0.1): candidates are octaves of pc within
+//   ±windowSize of target plus the cached octave if reachable within the
+//   cap. Cost = smooth + cache_pull + α·|c - registerTarget| (bass only).
+//
+// Drift-derived globals (computed once):
+//   windowSize = 12 + max(0, |drift| - 4)   — Fix 3, widen as drift grows
+//   α          = clamp((|drift|-4)/6, 0, 1.5) — Fix 2, register-pull weight
+//
+// Threshold for routing (Fix 1): cacheWeight < 0.1 sends the call to Pass 1.
+// At higher color the cache decays fast; gating at 0 left tiny-weight calls
+// stuck in Pass 2 with no drift correction, locking in drift permanently.
 int HarmonyEngine::findNearestOctaveDriftAware (int pc, int target, int lo, int hi,
-                                                  int cacheHint, float cacheWeight)
+                                                  int cacheHint, float cacheWeight,
+                                                  int registerTarget)
 {
-    // ── No cache: Pass 1 drift-aware tiebreaker. ──────────────────────────
-    if (cacheHint < 0 || cacheWeight <= 0.0f)
+    const float absDrift   = std::abs (currentDrift);
+    const float windowSize = 12.0f + juce::jmax (0.0f, absDrift - 4.0f);
+    const float alpha      = juce::jlimit (0.0f, 1.5f, (absDrift - 4.0f) / 6.0f);
+    const bool  pullToReg  = (registerTarget >= 0) && (alpha > 0.0f);
+
+    // ── Pass 1: drift-aware tiebreaker (no cache or stale cache). ─────────
+    if (cacheHint < 0 || cacheWeight < 0.1f)
     {
         int bestDist = INT_MAX;
         for (int oct = 0; oct <= 9; ++oct)
@@ -479,11 +488,31 @@ int HarmonyEngine::findNearestOctaveDriftAware (int pc, int target, int lo, int 
         }
         if (bestDist == INT_MAX) return target;
 
-        const float absDrift = std::abs (currentDrift);
-        const float slack = (absDrift < 4.0f)
-                                ? 0.0f
-                                : juce::jmin (8.0f, 0.25f * absDrift);
+        // Slack = absDrift - 4 (uncapped). At drift=4 this is 0 and
+        // behaviour matches "strict nearest". At drift=12 the lower
+        // octave (12 semitones from best) becomes admissible.
+        const float slack = (absDrift < 4.0f) ? 0.0f : (absDrift - 4.0f);
 
+        if (pullToReg)
+        {
+            // Bass path: continuous cost. smooth + α·|c - registerTarget|.
+            int   best = -1;
+            float bestCost = std::numeric_limits<float>::infinity();
+            for (int oct = 0; oct <= 9; ++oct)
+            {
+                int cand = oct * 12 + (pc % 12);
+                if (cand < lo || cand > hi) continue;
+                int d = std::abs (cand - target);
+                if ((float) (d - bestDist) > slack) continue;
+
+                float cost = (float) d
+                           + alpha * (float) std::abs (cand - registerTarget);
+                if (cost < bestCost) { bestCost = cost; best = cand; }
+            }
+            return (best == -1) ? target : best;
+        }
+
+        // Upper path: original drift-sign tiebreaker preserved.
         int best = -1;
         int bestScore = INT_MAX;
         for (int oct = 0; oct <= 9; ++oct)
@@ -502,7 +531,7 @@ int HarmonyEngine::findNearestOctaveDriftAware (int pc, int target, int lo, int 
         return (best == -1) ? target : best;
     }
 
-    // ── Cache-aware: Pass 2 cap + pull. ───────────────────────────────────
+    // ── Pass 2: cache-aware cap + pull. ───────────────────────────────────
     float baseCap = (cacheWeight >= 0.5f) ? 12.0f
                   : (cacheWeight >= 0.2f) ?  7.0f
                                           :  4.0f;
@@ -510,21 +539,19 @@ int HarmonyEngine::findNearestOctaveDriftAware (int pc, int target, int lo, int 
     if (effectiveCap < 4.0f) effectiveCap = 4.0f;
     const int capInt = (int) std::round (effectiveCap);
 
-    // Candidates: octaves of pc within ±12 of target and legal range.
+    // Candidates: octaves of pc within ±windowSize of target (Fix 3).
     int cands[16];
     int nCands = 0;
     for (int oct = 0; oct <= 9; ++oct)
     {
         int c = oct * 12 + (pc % 12);
         if (c < lo || c > hi) continue;
-        if (std::abs (c - target) > 12) continue;
+        if ((float) std::abs (c - target) > windowSize) continue;
         if (nCands < 16) cands[nCands++] = c;
     }
 
     // Cache override: ensure cached octave is in the candidate list when
-    // it's reachable within the cap (may lie outside the ±12 smoothness
-    // window when cap > 12 — currently capped at 12, so this only adds
-    // a candidate that was already included; kept for forward-compat).
+    // it's reachable within the cap.
     if (cacheHint >= lo && cacheHint <= hi
         && std::abs (cacheHint - target) <= capInt)
     {
@@ -537,17 +564,19 @@ int HarmonyEngine::findNearestOctaveDriftAware (int pc, int target, int lo, int 
     if (nCands == 0)
         return findNearestOctave (pc, target, lo, hi);
 
-    // Score each candidate: smoothness (distance from prev) + cache pull
-    // (penalty for distance from cached, scaled by recency weight).
+    // Score: smoothness + cache pull + register pull (bass only).
     constexpr float cachePullWeight = 0.8f;
     int   best = cands[0];
     float bestCost = std::numeric_limits<float>::infinity();
     for (int i = 0; i < nCands; ++i)
     {
         int c = cands[i];
-        float smooth = (float) std::abs (c - target);
-        float pull   = (float) std::abs (c - cacheHint) * cacheWeight * cachePullWeight;
-        float total  = smooth + pull;
+        float smooth  = (float) std::abs (c - target);
+        float pull    = (float) std::abs (c - cacheHint) * cacheWeight * cachePullWeight;
+        float regPull = pullToReg
+                          ? alpha * (float) std::abs (c - registerTarget)
+                          : 0.0f;
+        float total   = smooth + pull + regPull;
         if (total < bestCost) { bestCost = total; best = c; }
     }
     return best;
@@ -718,9 +747,13 @@ std::vector<int> HarmonyEngine::getBestInversion (
     const int cachedBass = cached ? cached->voicing[0] : -1;
 
     // Voice 1: root — cache-aware octave selection (cap + pull when
-    // cached entry exists, drift-aware tiebreaker otherwise).
+    // cached entry exists, drift-aware tiebreaker otherwise). Bass is
+    // the only voice that gets register-pull (Fix 2): the bass anchors
+    // overall register, while uppers should follow smoothly.
     int prevBass = prevVoices.front();
-    int bassNote = findNearestOctaveDriftAware (rootPC, prevBass, 24, 72, cachedBass, cacheWeight);
+    int bassNote = findNearestOctaveDriftAware (rootPC, prevBass, 24, 72,
+                                                  cachedBass, cacheWeight,
+                                                  targetRegisterCenter);
 
     // Get 3 required upper pitch classes
     auto upperPCs = getUpperPCs (chordTones);

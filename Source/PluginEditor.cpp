@@ -285,6 +285,16 @@ void FormaEditor::timerCallback()
     if (resetFlashTimer > 0.0f)
         resetFlashTimer -= dt;
 
+    // Decay capture button flash
+    if (captureFlashTimer > 0.0f)
+        captureFlashTimer -= dt;
+
+    // Sync compose mode from processor (host-state restore, plug-in chain).
+    {
+        int pm = proc.composeMode.load();
+        if (pm != composeModeUI) composeModeUI = pm;
+    }
+
     // Sync suggestions toggle from processor
     suggestionsOn = proc.suggestionsVisible.load();
 
@@ -391,6 +401,9 @@ void FormaEditor::syncUIFromProcessor()
     // Suggestions
     suggestionsOn = proc.suggestionsVisible.load();
 
+    // Compose mode
+    composeModeUI = juce::jlimit (0, 1, proc.composeMode.load());
+
     updateChordLabels();
     repaint();
 }
@@ -428,6 +441,33 @@ void FormaEditor::paint (juce::Graphics& g)
     for (int i = 0; i < 7; ++i)
         chordKeyRects[i] = juce::Rectangle<int> (centerCol.getX() + i * (ckW + ckGap), ckY + 14, ckW, ckH);
 
+    // Capture button — bottom-right of pill row, in the gap above the
+    // status bar. Visible only in Sketch mode but rect always layouted.
+    {
+        const int capW = 72, capH = 11;
+        captureBtnRect = juce::Rectangle<int> (centerCol.getRight() - capW - 4,
+                                                ckY + 14 + ckH + 1,
+                                                capW, capH);
+    }
+
+    // Compose step grid — 2 rows × 8 cols, fills the same area as chord pills.
+    {
+        const int gap  = 5;
+        const int cols = 8, rows = 2;
+        const int sGridW = ckTotalW;
+        const int sGridH = ckH;
+        const int sw = (sGridW - gap * (cols - 1)) / cols;
+        const int sh = (sGridH - gap * (rows - 1)) / rows;
+        for (int i = 0; i < 16; ++i)
+        {
+            int row = i / cols;
+            int col = i % cols;
+            int x = centerCol.getX() + col * (sw + gap);
+            int y = ckY + 14 + row * (sh + gap);
+            stepRects[i] = juce::Rectangle<int> (x, y, sw, sh);
+        }
+    }
+
     g.fillAll (BG4);
 
     drawTopBar   (g);
@@ -462,6 +502,42 @@ void FormaEditor::drawTopBar (juce::Graphics& g)
     g.drawText ("F O R M A", logo.translated (1, 1), juce::Justification::centredLeft);
     g.setColour (TXT_HI);
     g.drawText ("F O R M A", logo, juce::Justification::centredLeft);
+
+    // ── Sketch / Compose mode toggle ──
+    {
+        const int pillW = 64, pillH = 20, gap = 4;
+        int x = 130;
+        int y = r.getCentreY() - pillH / 2;
+        modeSketchRect  = juce::Rectangle<int> (x, y, pillW, pillH);
+        modeComposeRect = juce::Rectangle<int> (x + pillW + gap, y, pillW, pillH);
+        const bool sketchActive  = (composeModeUI == 0);
+        const bool composeActive = (composeModeUI == 1);
+
+        auto drawModePill = [&] (juce::Rectangle<int> rr, const juce::String& label, bool active)
+        {
+            auto rf = rr.toFloat();
+            if (active)
+            {
+                juce::ColourGradient bg (juce::Colour (0xFF2A1F15), rf.getX(), rf.getY(),
+                                         juce::Colour (0xFF1A140C), rf.getX(), rf.getBottom(), false);
+                g.setGradientFill (bg);
+                g.fillRoundedRectangle (rf, 4.0f);
+                g.setColour (LofiC::AMBER);
+                g.drawRoundedRectangle (rf, 4.0f, 1.0f);
+                g.setColour (LofiC::INK_HERO);
+            }
+            else
+            {
+                g.setColour (BORDER);
+                g.drawRoundedRectangle (rf, 4.0f, 1.0f);
+                g.setColour (TXT_DIM);
+            }
+            g.setFont (mono (9.0f));
+            g.drawText (label, rr, juce::Justification::centred);
+        };
+        drawModePill (modeSketchRect,  "SKETCH",  sketchActive);
+        drawModePill (modeComposeRect, "COMPOSE", composeActive);
+    }
 
     // Right side — right to left
     int rx = getWidth() - 14;
@@ -690,8 +766,16 @@ void FormaEditor::drawCenter (juce::Graphics& g)
     g.drawHorizontalLine (divY, (float) centerCol.getX(),
                           (float) centerCol.getRight());
 
-    for (int i = 0; i < 7; ++i)
-        drawChordKey (g, chordKeyRects[i], i);
+    if (composeModeUI == 1)
+    {
+        drawStepGrid (g);
+    }
+    else
+    {
+        for (int i = 0; i < 7; ++i)
+            drawChordKey (g, chordKeyRects[i], i);
+        drawCaptureBtn (g);
+    }
 }
 
 // ═════════════════════════════════════════════════════════════════════════
@@ -1181,6 +1265,148 @@ void FormaEditor::drawChordKey (juce::Graphics& g, juce::Rectangle<int> r, int i
                     juce::Rectangle<int> (r.getX(), qualY, r.getWidth(), 12),
                     juce::Justification::centred);
     }
+}
+
+// ═════════════════════════════════════════════════════════════════════════
+// COMPOSE STEP
+// Pill-style cell. Active steps show roman numeral + duration. Off steps
+// render as a dim dot. The currently-playing step gets a warm amber glow.
+// ═════════════════════════════════════════════════════════════════════════
+
+void FormaEditor::drawComposeStep (juce::Graphics& g, juce::Rectangle<int> r,
+                                    int idx, int playingStep)
+{
+    const int  degree   = proc.composeSteps[(size_t) idx].degree.load();
+    const int  duration = proc.composeSteps[(size_t) idx].duration.load();
+    const bool isActive = (degree >= 1 && degree <= 7);
+    const bool isPlaying = (idx == playingStep);
+    const float rad = 6.0f;
+    auto rf = r.toFloat();
+
+    // Background — same gradient family as chord pills, slightly muted.
+    {
+        juce::ColourGradient bg (juce::Colour (0xFF1E1A12), rf.getX(), rf.getY(),
+                                 juce::Colour (0xFF15110A), rf.getX(), rf.getBottom(), false);
+        g.setGradientFill (bg);
+        g.fillRoundedRectangle (rf, rad);
+    }
+
+    // Grain inside cell.
+    {
+        juce::Path clip;
+        clip.addRoundedRectangle (rf, rad);
+        juce::Graphics::ScopedSaveState ss (g);
+        g.reduceClipRegion (clip);
+        drawGrainOverlay (g, r, 0.10f);
+    }
+
+    // Playing glow (amber radial from bottom).
+    if (isPlaying)
+    {
+        juce::ColourGradient glow (LofiC::AMBER.withAlpha (0.35f),
+                                   rf.getCentreX(), rf.getBottom(),
+                                   LofiC::AMBER.withAlpha (0.0f),
+                                   rf.getCentreX(), rf.getY(), false);
+        g.setGradientFill (glow);
+        juce::Path clip;
+        clip.addRoundedRectangle (rf, rad);
+        juce::Graphics::ScopedSaveState ss (g);
+        g.reduceClipRegion (clip);
+        g.fillAll();
+    }
+
+    // Border — amber when active, ghost when off.
+    if (isPlaying)
+    {
+        g.setColour (LofiC::AMBER.withAlpha (0.25f));
+        g.drawRoundedRectangle (rf.expanded (1.5f), rad + 1.5f, 1.5f);
+        g.setColour (LofiC::AMBER);
+        g.drawRoundedRectangle (rf, rad, 1.2f);
+    }
+    else if (isActive)
+    {
+        g.setColour (juce::Colour (0xFF3A2818));
+        g.drawRoundedRectangle (rf, rad, 1.0f);
+    }
+    else
+    {
+        g.setColour (juce::Colour (0xFF221E18));
+        g.drawRoundedRectangle (rf, rad, 1.0f);
+    }
+
+    if (isActive)
+    {
+        // Roman numeral, italic Cormorant-spirit (sans italic stand-in).
+        static const char* up[] = { "I", "II", "III", "IV", "V", "VI", "VII" };
+        juce::String roman = juce::String (up[juce::jlimit (0, 6, degree - 1)]);
+        // Quality (re-use harmonyEngine for diatonic variant).
+        auto q = proc.harmonyEngine.getChordQuality (degree);
+        if (q == "m" || q == "d")
+            roman = roman.toLowerCase();
+        if (q == "d") roman += juce::String (juce::CharPointer_UTF8 ("\xc2\xb0"));
+        if (q == "A") roman += "+";
+
+        g.setFont (juce::Font (juce::Font::getDefaultSansSerifFontName(), 20.0f,
+                                juce::Font::italic));
+        g.setColour (isPlaying ? LofiC::INK_HERO : juce::Colour (0xFFB89878));
+        g.drawText (roman, r.withTrimmedBottom (16), juce::Justification::centred);
+
+        // Duration label at bottom (e.g., "4 ♩" → use beat count + tag).
+        juce::String durTag;
+        if      (duration == 1)  durTag = "1";
+        else if (duration == 2)  durTag = "2";
+        else if (duration == 4)  durTag = "4";
+        else if (duration == 8)  durTag = "8";
+        else if (duration == 16) durTag = "16";
+        else                     durTag = juce::String (duration);
+        g.setFont (mono (8.0f));
+        g.setColour (isPlaying ? juce::Colour (0xFFD8A878) : TXT_DIM);
+        g.drawText (durTag + " " + juce::String (juce::CharPointer_UTF8 ("\xe2\x99\xa9")),
+                    juce::Rectangle<int> (r.getX(), r.getBottom() - 14, r.getWidth(), 12),
+                    juce::Justification::centred);
+    }
+    else
+    {
+        // Dim dot for an "off" step.
+        float cx = rf.getCentreX();
+        float cy = rf.getCentreY();
+        g.setColour (juce::Colour (0xFF3A332A));
+        g.fillEllipse (cx - 2.0f, cy - 2.0f, 4.0f, 4.0f);
+    }
+}
+
+void FormaEditor::drawStepGrid (juce::Graphics& g)
+{
+    const int playingStep = proc.composeDisplayStep.load();
+    for (int i = 0; i < 16; ++i)
+        drawComposeStep (g, stepRects[i], i, playingStep);
+}
+
+// ═════════════════════════════════════════════════════════════════════════
+// CAPTURE BUTTON  (Sketch mode only)
+// Subtle, secondary visual weight. Bottom-right of the chord pill row.
+// ═════════════════════════════════════════════════════════════════════════
+
+void FormaEditor::drawCaptureBtn (juce::Graphics& g)
+{
+    auto rf = captureBtnRect.toFloat();
+    const bool flashing = (captureFlashTimer > 0.0f);
+    if (flashing)
+    {
+        g.setColour (LofiC::AMBER.withAlpha (0.18f));
+        g.fillRoundedRectangle (rf, 3.0f);
+        g.setColour (LofiC::AMBER);
+        g.drawRoundedRectangle (rf, 3.0f, 1.0f);
+        g.setColour (LofiC::INK_HERO);
+    }
+    else
+    {
+        g.setColour (BORDER);
+        g.drawRoundedRectangle (rf, 3.0f, 1.0f);
+        g.setColour (TXT_DIM);
+    }
+    g.setFont (mono (8.0f));
+    g.drawText ("CAPTURE", captureBtnRect, juce::Justification::centred);
 }
 
 // ═════════════════════════════════════════════════════════════════════════
@@ -1708,6 +1934,30 @@ void FormaEditor::mouseDown (const juce::MouseEvent& e)
         return;
     }
 
+    // ── Mode toggle (top bar) ──
+    if (modeSketchRect.contains (pos))
+    {
+        if (composeModeUI != 0)
+        {
+            composeModeUI = 0;
+            proc.composeMode.store (0);
+            proc.releaseChordFromEditor();
+        }
+        repaint();
+        return;
+    }
+    if (modeComposeRect.contains (pos))
+    {
+        if (composeModeUI != 1)
+        {
+            composeModeUI = 1;
+            proc.composeMode.store (1);
+            proc.releaseChordFromEditor();
+        }
+        repaint();
+        return;
+    }
+
     // ── XY Pad (circular bounds) ──
     {
         float dx = (float)(pos.x - xyPadCircle.getCentreX());
@@ -1732,6 +1982,52 @@ void FormaEditor::mouseDown (const juce::MouseEvent& e)
             repaint();
             return;
         }
+    }
+
+    // ── Compose mode: step grid ──
+    if (composeModeUI == 1)
+    {
+        const bool isRight = e.mods.isRightButtonDown() || e.mods.isCtrlDown();
+        for (int i = 0; i < 16; ++i)
+        {
+            if (stepRects[i].contains (pos))
+            {
+                if (isRight)
+                {
+                    // Cycle duration: 1 → 2 → 4 → 8 → 16 → 1
+                    int cur = proc.composeSteps[(size_t) i].duration.load();
+                    int next = (cur == 1)  ? 2
+                            : (cur == 2)  ? 4
+                            : (cur == 4)  ? 8
+                            : (cur == 8)  ? 16
+                            :               1;
+                    proc.composeSteps[(size_t) i].duration.store (next);
+                }
+                else
+                {
+                    // Cycle degree: off → I → ... → VII → off
+                    int cur = proc.composeSteps[(size_t) i].degree.load();
+                    int next = (cur + 1) % 8;
+                    proc.composeSteps[(size_t) i].degree.store (next);
+                }
+                repaint();
+                return;
+            }
+        }
+        return;
+    }
+
+    // ── Capture button (Sketch mode) ──
+    if (captureBtnRect.contains (pos))
+    {
+        int n = proc.captureFromSketch();
+        if (n > 0)
+        {
+            composeModeUI = 1;
+            captureFlashTimer = 0.6f;
+        }
+        repaint();
+        return;
     }
 
     // ── Chord keys ──

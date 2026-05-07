@@ -137,6 +137,18 @@ private:
     juce::Rectangle<int> compassContainer;
     juce::Rectangle<int> chordKeyRects[7];
 
+    // ── Sketch / Compose mode toggle (top bar) ──
+    int composeModeUI = 0;  // 0 = Sketch, 1 = Compose
+    juce::Rectangle<int> modeSketchRect;
+    juce::Rectangle<int> modeComposeRect;
+
+    // ── Compose step grid (replaces chord pill row in Compose mode) ──
+    juce::Rectangle<int> stepRects[16];
+
+    // ── Capture button (visible in Sketch mode) ──
+    juce::Rectangle<int> captureBtnRect;
+    float captureFlashTimer = 0.0f;  // post-press feedback flash
+
     // Gear button rect
     juce::Rectangle<int> gearBtnRect;
     // Link indicator rect
@@ -186,6 +198,10 @@ private:
     void drawRightCol    (juce::Graphics& g);
     void drawStatusBar   (juce::Graphics& g);
     void drawChordKey    (juce::Graphics& g, juce::Rectangle<int> r, int idx);
+    void drawComposeStep (juce::Graphics& g, juce::Rectangle<int> r, int idx, int playingStep);
+    void drawStepGrid    (juce::Graphics& g);
+    void drawCaptureBtn  (juce::Graphics& g);
+    void drawModeToggle  (juce::Graphics& g, int& xRight);
     void drawXYPad       (juce::Graphics& g);
     void drawAdvanced    (juce::Graphics& g);
     void drawPill        (juce::Graphics& g, juce::Rectangle<int> r, const juce::String& text, bool active);

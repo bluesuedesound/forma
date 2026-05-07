@@ -152,6 +152,25 @@ void FormaProcessor::getStateInformation (juce::MemoryBlock& destData)
     // Suggestions
     xml->setAttribute ("suggestionsVisible", suggestionsVisible.load());
 
+    // ── Compose mode state ──
+    xml->setAttribute ("composeMode", composeMode.load());
+    xml->setAttribute ("snapshotValid",   snapshotValid.load());
+    xml->setAttribute ("snapshotColor",   (double) snapshotColor.load());
+    xml->setAttribute ("snapshotFeel",    (double) snapshotFeel.load());
+    xml->setAttribute ("snapshotKey",     snapshotKey.load());
+    xml->setAttribute ("snapshotChordOct", snapshotChordOct.load());
+    xml->setAttribute ("snapshotMoodIdx", snapshotMoodIdx.load());
+    {
+        auto* steps = xml->createNewChildElement ("ComposeSteps");
+        for (int i = 0; i < kComposeSteps; ++i)
+        {
+            auto* s = steps->createNewChildElement ("Step");
+            s->setAttribute ("i", i);
+            s->setAttribute ("d", composeSteps[(size_t) i].degree.load());
+            s->setAttribute ("dur", composeSteps[(size_t) i].duration.load());
+        }
+    }
+
     // Presets
     for (int i = 0; i < NUM_PRESETS; ++i)
     {
@@ -225,6 +244,34 @@ void FormaProcessor::setStateInformation (const void* data, int sizeInBytes)
 
     // Suggestions
     suggestionsVisible.store (xml->getBoolAttribute ("suggestionsVisible", true));
+
+    // ── Compose mode state ──
+    composeMode.store      (juce::jlimit (0, 1, xml->getIntAttribute ("composeMode", 0)));
+    snapshotValid.store    (xml->getBoolAttribute    ("snapshotValid", false));
+    snapshotColor.store    ((float) xml->getDoubleAttribute ("snapshotColor", 0.5));
+    snapshotFeel.store     ((float) xml->getDoubleAttribute ("snapshotFeel",  0.0));
+    snapshotKey.store      (juce::jlimit (0, 11, xml->getIntAttribute ("snapshotKey", 0)));
+    snapshotChordOct.store (juce::jlimit (-2, 2, xml->getIntAttribute ("snapshotChordOct", 0)));
+    snapshotMoodIdx.store  (juce::jlimit (0, 11, xml->getIntAttribute ("snapshotMoodIdx", 0)));
+    // Reset all steps to off, then load any saved values.
+    for (auto& s : composeSteps) { s.degree.store (0); s.duration.store (4); }
+    if (auto* steps = xml->getChildByName ("ComposeSteps"))
+    {
+        for (auto* s : steps->getChildWithTagNameIterator ("Step"))
+        {
+            int i = s->getIntAttribute ("i", -1);
+            if (i < 0 || i >= kComposeSteps) continue;
+            composeSteps[(size_t) i].degree.store   (juce::jlimit (0, 7, s->getIntAttribute ("d", 0)));
+            int dur = s->getIntAttribute ("dur", 4);
+            // Snap to valid duration set.
+            int validDurs[] = { 1, 2, 4, 8, 16 };
+            int snap = 4;
+            int bestGap = 99999;
+            for (int v : validDurs)
+            { int g = std::abs (v - dur); if (g < bestGap) { bestGap = g; snap = v; } }
+            composeSteps[(size_t) i].duration.store (snap);
+        }
+    }
 
     // Drift
     driftAmount.store (getDriftForMoodAndFeel (feelAmount.load()));
@@ -491,18 +538,24 @@ void FormaProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     }
 
     // Transport tracking + beat position estimation
+    bool   blockIsPlaying = false;
+    double blockPpq       = 0.0;
+    bool   blockHasPpq    = false;
     if (auto* ph = getPlayHead())
     {
         auto posInfo = ph->getPosition();
         if (posInfo.hasValue())
         {
             bool isPlaying = posInfo->getIsPlaying();
+            blockIsPlaying = isPlaying;
 
             if (isPlaying)
             {
                 if (auto ppq = posInfo->getPpqPosition())
                 {
                     double ppqVal = *ppq;
+                    blockPpq    = ppqVal;
+                    blockHasPpq = true;
                     if (ppqVal < lastKnownPpqPosition - 1.0)
                         resetHarmonicState();
                     lastKnownPpqPosition = ppqVal;
@@ -576,6 +629,31 @@ void FormaProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     // Safety: cap pending notes to prevent unbounded growth
     if (pendingNotes.size() > 32)
         pendingNotes.clear();
+
+    // ── Compose-mode playback dispatcher ──
+    // Drives chord triggers from playhead position when host transport
+    // is playing. Uses Sketch's voicer (the existing triggerChord path).
+    if (composeMode.load() == 1)
+    {
+        if (blockIsPlaying && blockHasPpq)
+        {
+            updateComposePlayback (output, 0, true, blockPpq);
+        }
+        else if (composeActiveDegree >= 0)
+        {
+            // Transport stopped or scrubbed away — release any held chord.
+            releaseComposeChord (output, 0);
+            composeCurrentStep   = -1;
+            composeDisplayStep.store (-1);
+        }
+    }
+    else if (composeActiveDegree >= 0)
+    {
+        // Mode switched away from Compose with a chord still held — release.
+        releaseComposeChord (output, 0);
+        composeCurrentStep = -1;
+        composeDisplayStep.store (-1);
+    }
 
     // MIDI trigger only active when bass mode uses it (KickTrigger or
     // KickVariation). Root mode ignores trigger notes.
@@ -1034,20 +1112,51 @@ void FormaProcessor::triggerChord (int degree, juce::uint8 inputVelocity,
     lastPlayedDegree = degree;
 
     // Update beat position for suggestions
+    bool   pressIsPlaying = false;
+    double pressPpq       = 0.0;
     if (auto* ph = getPlayHead())
     {
         auto posInfo = ph->getPosition();
         if (posInfo.hasValue())
         {
             if (auto b = posInfo->getBpm()) linkBpm.store (*b);
-            if (posInfo->getIsPlaying())
+            pressIsPlaying = posInfo->getIsPlaying();
+            if (pressIsPlaying)
             {
                 if (auto ppq = posInfo->getPpqPosition())
-                    currentBeatPosition = (float) std::fmod (*ppq, 4.0);
+                {
+                    pressPpq = *ppq;
+                    currentBeatPosition = (float) std::fmod (pressPpq, 4.0);
+                }
             }
             else
                 currentBeatPosition = 0.0f;  // chord press = beat 1 in free play
         }
+    }
+
+    // ── Capture press tracking — Sketch mode only ──
+    // Compose playback also calls triggerChord; we don't want that to
+    // pollute the recent-press history used by the Capture button.
+    if (composeMode.load() == 0)
+    {
+        double timeInBeats;
+        if (pressIsPlaying)
+        {
+            timeInBeats = pressPpq;
+        }
+        else
+        {
+            // Free play: convert wall-clock to beats at current bpm.
+            double bpm = linkBpm.load();
+            if (bpm < 30.0) bpm = 120.0;
+            double msPerBeat = 60000.0 / bpm;
+            timeInBeats = lastChordPressTimeMs / msPerBeat;
+        }
+        const juce::SpinLock::ScopedLockType lock (recentPressLock);
+        recentPresses[(size_t) nextPressSlot].degree      = degree;
+        recentPresses[(size_t) nextPressSlot].timeInBeats = timeInBeats;
+        nextPressSlot = (nextPressSlot + 1) % kComposeSteps;
+        if (pressCount < kComposeSteps) ++pressCount;
     }
 
     // Immediately commit anchor for first chord (no prior context to wait for)
@@ -1168,6 +1277,168 @@ void FormaProcessor::releaseChordFromEditor()
         editorMidi.addEvent (juce::MidiMessage::noteOff (1, degreeToNote[d]), 0);
     // Clear held counts so MIDI-keyboard state stays consistent
     std::memset (heldDegreeCounts, 0, sizeof (heldDegreeCounts));
+}
+
+// ── Compose mode: playback state machine ───────────────────────────────────
+
+int FormaProcessor::composeStepAtBeat (double beats, double& stepStartOut) const
+{
+    // Sum durations to find the step containing `beats` (assumed non-negative,
+    // already mod-ed against total). Returns -1 if no active step exists.
+    double cum = 0.0;
+    for (int i = 0; i < kComposeSteps; ++i)
+    {
+        int dur = composeSteps[(size_t) i].duration.load();
+        if (dur < 1) dur = 1;
+        if (beats < cum + (double) dur)
+        {
+            stepStartOut = cum;
+            return i;
+        }
+        cum += dur;
+    }
+    stepStartOut = 0.0;
+    return -1;
+}
+
+void FormaProcessor::releaseComposeChord (juce::MidiBuffer& out, int samplePosition)
+{
+    if (composeActiveDegree < 0) return;
+    releaseChord (out, juce::jlimit (0, currentBlockSize - 1, samplePosition));
+    composeActiveDegree = -1;
+}
+
+void FormaProcessor::updateComposePlayback (juce::MidiBuffer& out, int samplePosition,
+                                             bool isPlaying, double ppq)
+{
+    if (! isPlaying) return;
+
+    // Compute total duration. If 0 (no active steps), idle.
+    double total = 0.0;
+    for (int i = 0; i < kComposeSteps; ++i)
+    {
+        int d = composeSteps[(size_t) i].duration.load();
+        if (d < 1) d = 1;
+        total += d;
+    }
+    if (total <= 0.0)
+    {
+        if (composeActiveDegree >= 0)
+            releaseComposeChord (out, samplePosition);
+        composeCurrentStep = -1;
+        composeDisplayStep.store (-1);
+        return;
+    }
+
+    // Loop ppq into [0, total). Negative ppq wraps too (host pre-roll).
+    double loopBeats = std::fmod (ppq, total);
+    if (loopBeats < 0.0) loopBeats += total;
+
+    double stepStart = 0.0;
+    int newStep = composeStepAtBeat (loopBeats, stepStart);
+    composeDisplayStep.store (newStep);
+
+    if (newStep < 0) return;
+
+    const int newDegree = composeSteps[(size_t) newStep].degree.load();
+
+    // Skip only if the same step is still active AND its degree matches
+    // what we are actually voicing. If the user edited the step's degree
+    // mid-playback, the second test fails and we re-trigger.
+    if (newStep == composeCurrentStep && composeActiveDegree == newDegree)
+        return;
+
+    const int safeOffset = juce::jlimit (0, juce::jmax (0, currentBlockSize - 1), samplePosition);
+
+    if (composeActiveDegree >= 0)
+        releaseChord (out, safeOffset);
+
+    composeCurrentStep  = newStep;
+    composeActiveDegree = -1;
+
+    if (newDegree >= 1 && newDegree <= 7)
+    {
+        // Use Sketch's voicer: the same triggerChord path used by chord
+        // pills and CC1. It handles voicing, drift, bass, suggestions.
+        // Velocity 90 — slightly above the editor's 80 default for clarity.
+        triggerChord (newDegree, (juce::uint8) 90, out, safeOffset);
+        composeActiveDegree = newDegree;
+    }
+}
+
+// ── Capture: snapshot recent presses into composeSteps ─────────────────────
+
+int FormaProcessor::captureFromSketch()
+{
+    // Snapshot recent presses under the lock.
+    std::vector<ChordPress> presses;
+    presses.reserve (kComposeSteps);
+    {
+        const juce::SpinLock::ScopedLockType lock (recentPressLock);
+        const int count = juce::jmin (pressCount, kComposeSteps);
+        // recentPresses is a circular buffer; oldest entry sits at
+        // (nextPressSlot - count) mod capacity.
+        for (int i = 0; i < count; ++i)
+        {
+            int idx = (nextPressSlot - count + i + kComposeSteps) % kComposeSteps;
+            presses.push_back (recentPresses[(size_t) idx]);
+        }
+    }
+    if (presses.empty()) return 0;
+
+    // Snap a beat gap to the nearest valid duration value.
+    auto snapDuration = [] (double gapBeats) -> int
+    {
+        static const int valid[] = { 1, 2, 4, 8, 16 };
+        if (gapBeats <= 0.0) return 4;
+        int best = 4;
+        double bestErr = 1e9;
+        for (int v : valid)
+        {
+            double err = std::abs ((double) v - gapBeats);
+            if (err < bestErr) { bestErr = err; best = v; }
+        }
+        return best;
+    };
+
+    // Reset all 16 steps, then write captured presses into the front.
+    for (int i = 0; i < kComposeSteps; ++i)
+    {
+        composeSteps[(size_t) i].degree.store (0);
+        composeSteps[(size_t) i].duration.store (4);
+    }
+    const int N = (int) presses.size();
+    for (int i = 0; i < N; ++i)
+    {
+        composeSteps[(size_t) i].degree.store (juce::jlimit (1, 7, presses[(size_t) i].degree));
+        int dur = 4;
+        if (i + 1 < N)
+        {
+            double gap = presses[(size_t) (i + 1)].timeInBeats
+                       - presses[(size_t) i].timeInBeats;
+            dur = snapDuration (gap);
+        }
+        composeSteps[(size_t) i].duration.store (dur);
+    }
+
+    // Save mood snapshot.
+    snapshotColor.store    (colorAmount.load());
+    snapshotFeel.store     (feelAmount.load());
+    snapshotKey.store      (juce::jlimit (0, 11, harmonyEngine.getRootMidi() - 48));
+    snapshotChordOct.store (octaveChordParam.load());
+    snapshotMoodIdx.store  (juce::jlimit (0, (int) HarmonyEngine::moodNames.size() - 1,
+                                            harmonyEngine.getCurrentMoodIndex()));
+    snapshotValid.store    (true);
+
+    // Switch to Compose mode. Editor mirrors via timer / sync.
+    composeMode.store (1);
+
+    // Reset playback display so the editor stops highlighting any
+    // previously-playing step. The audio thread re-evaluates next block
+    // and naturally re-triggers from the new steps array.
+    composeDisplayStep.store (-1);
+
+    return N;
 }
 
 juce::AudioProcessorEditor* FormaProcessor::createEditor()

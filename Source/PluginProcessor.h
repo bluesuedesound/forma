@@ -89,6 +89,44 @@ public:
     void releaseChordFromEditor();
     void applyMoodDefaults (int moodIndex);
 
+    // ── Sketch / Compose mode ─────────────────────────────────────────────
+    // 0 = Sketch (live performance), 1 = Compose (locked progression
+    // played back by host transport). Default Sketch.
+    std::atomic<int> composeMode { 0 };
+
+    struct ComposeStep {
+        std::atomic<int> degree   { 0 };  // 0=off, 1..7
+        std::atomic<int> duration { 4 };  // quarter-note beats: 1,2,4,8,16
+    };
+    static constexpr int kComposeSteps = 16;
+    std::array<ComposeStep, kComposeSteps> composeSteps;
+
+    // Currently-playing step indicator for the editor (display only).
+    std::atomic<int> composeDisplayStep { -1 };
+
+    // Mood snapshot saved at capture time. Persisted alongside compose
+    // steps so a session restored from disk recalls the captured mood.
+    std::atomic<float> snapshotColor    { 0.5f };
+    std::atomic<float> snapshotFeel     { 0.0f };
+    std::atomic<int>   snapshotKey      { 0 };
+    std::atomic<int>   snapshotChordOct { 0 };
+    std::atomic<int>   snapshotMoodIdx  { 0 };
+    std::atomic<bool>  snapshotValid    { false };
+
+    // Recent chord presses, used by Capture to estimate per-step durations.
+    struct ChordPress {
+        int    degree      = 0;
+        double timeInBeats = 0.0;
+    };
+    std::array<ChordPress, kComposeSteps> recentPresses;
+    int            pressCount    = 0;
+    int            nextPressSlot = 0;
+    juce::SpinLock recentPressLock;
+
+    // Capture: read the most recent chord history, fill composeSteps,
+    // save mood snapshot, switch mode to Compose. Returns count written.
+    int captureFromSketch();
+
     std::atomic<int> activeDegree { -1 };
     std::atomic<float> lastChordVelocity { 0.8f };
     juce::String currentChordName;
@@ -198,6 +236,14 @@ private:
     double lastKnownPpqPosition = 0.0;
     bool   transportWasPlaying  = false;
     float  currentBeatPosition  = 0.0f;
+
+    // Compose playback state (audio thread only).
+    int  composeCurrentStep   = -1;   // step index currently held
+    int  composeActiveDegree  = -1;   // degree currently sounding via Compose
+    void updateComposePlayback (juce::MidiBuffer& out, int samplePosition,
+                                 bool isPlaying, double ppq);
+    void releaseComposeChord  (juce::MidiBuffer& out, int samplePosition);
+    int  composeStepAtBeat    (double beats, double& stepStartOut) const;
 
     void triggerChord (int degree, juce::uint8 velocity, juce::MidiBuffer& out,
                        int samplePosition);
