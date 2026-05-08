@@ -1,5 +1,6 @@
 #pragma once
 #include <juce_core/juce_core.h>
+#include <atomic>
 #include <vector>
 #include <deque>
 #include <map>
@@ -63,7 +64,7 @@ public:
     }
     int getRootMidi() const { return rootMidiNote; }
     int getVoicing() const { return voicingSetting; }
-    float getColorAmount() const { return colorAmount; }
+    float getColorAmount() const { return colorAmount.load(); }
     const std::vector<int>& getScaleMidi() const { return scaleMidi; }
     int getTargetRegisterCenter() const { return targetRegisterCenter; }
 
@@ -76,7 +77,11 @@ private:
     int rootMidiNote = 48;
     int extensionTier = 1;
     int voicingSetting = 0;
-    float colorAmount = 0.5f;
+    // Color is written from the message thread (XY pad / mood transition
+    // timer / preset / state restore) and read on the audio thread inside
+    // getChord/getColorTier. Atomic eliminates the data race and prevents
+    // the compiler from hoisting reads past function-call boundaries.
+    std::atomic<float> colorAmount { 0.5f };
     float feelAmount  = 0.0f;
 
     std::vector<int> scaleIntervals;

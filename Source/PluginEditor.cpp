@@ -519,22 +519,23 @@ void FormaEditor::paint (juce::Graphics& g)
     xyPadCircle = juce::Rectangle<int> (padX, padY, padSize, padSize);
 
     // Chord keys: 7 equal width across the bottom of centerCol. ckH was
-    // 154; reduced to 138 to make room for a properly-sized Capture
+    // 154; reduced to 134 to make room for a properly-sized Capture
     // button below the row in the gap above the status bar. Pill text
     // is bottom-anchored so the visual reads identically.
     int ckY = centerCol.getY() + circleAreaH;
-    int ckH = 138;
+    int ckH = 134;
     int ckGap = 5;
     int ckTotalW = centerCol.getWidth();
     int ckW = (ckTotalW - ckGap * 6) / 7;
     for (int i = 0; i < 7; ++i)
         chordKeyRects[i] = juce::Rectangle<int> (centerCol.getX() + i * (ckW + ckGap), ckY + 14, ckW, ckH);
 
-    // Capture button — bottom-right of pill row area. Sized to match
-    // the ADVANCED button in the title bar (subtle bordered pill,
-    // 80×22). Visible only in Sketch mode.
+    // Capture button — bottom-right of pill row area. Same visual
+    // recipe as the ADVANCED button in the title bar (BG4-filled pill
+    // so border + text contrast read identically). Visible only in
+    // Sketch mode.
     {
-        const int capW = 80, capH = 22;
+        const int capW = 80, capH = 24;
         captureBtnRect = juce::Rectangle<int> (centerCol.getRight() - capW - 4,
                                                 ckY + 14 + ckH + 4,
                                                 capW, capH);
@@ -1507,42 +1508,22 @@ void FormaEditor::drawCaptureBtn (juce::Graphics& g)
     const bool flashing = (captureFlashTimer > 0.0f);
     const bool hover    = captureHovered;
 
-    // Subtle filled pill matching the ADVANCED button family (bordered,
-    // grain inside, dim resting state). Hover brightens border to amber;
-    // flashing fades amber glow back over ~600ms.
-    {
-        juce::ColourGradient bg (juce::Colour (0xFF1A1814), rf.getX(), rf.getY(),
-                                 juce::Colour (0xFF131110), rf.getX(), rf.getBottom(), false);
-        g.setGradientFill (bg);
-        g.fillRoundedRectangle (rf, rad);
-    }
+    // Mirror of the ADVANCED button: solid BG4 surface inside the pill
+    // so border-vs-fill contrast is identical to the title-bar version.
+    // Without this, the button is invisible against the lighter
+    // mood-tinted centerCol bg.
+    g.setColour (BG4);
+    g.fillRoundedRectangle (rf, rad);
 
-    // Grain inside, masked to the rounded rect.
-    {
-        juce::Path clip;
-        clip.addRoundedRectangle (rf, rad);
-        juce::Graphics::ScopedSaveState ss (g);
-        g.reduceClipRegion (clip);
-        drawGrainOverlay (g, captureBtnRect, 0.07f);
-    }
-
-    // Amber flash glow during the post-capture confirmation window.
+    // Amber flash overlay (only during the post-capture confirmation).
     if (flashing)
     {
         const float a = juce::jlimit (0.0f, 1.0f, captureFlashTimer / 0.6f);
-        juce::ColourGradient glow (LofiC::AMBER.withAlpha (0.30f * a),
-                                    rf.getCentreX(), rf.getBottom(),
-                                    LofiC::AMBER.withAlpha (0.0f),
-                                    rf.getCentreX(), rf.getY(), false);
-        g.setGradientFill (glow);
-        juce::Path clip;
-        clip.addRoundedRectangle (rf, rad);
-        juce::Graphics::ScopedSaveState ss (g);
-        g.reduceClipRegion (clip);
-        g.fillAll();
+        g.setColour (LofiC::AMBER.withAlpha (0.28f * a));
+        g.fillRoundedRectangle (rf, rad);
     }
 
-    // Border + label.
+    // Border + label — exact recipe of the ADVANCED button at rest.
     if (flashing)
     {
         g.setColour (LofiC::AMBER);
@@ -1557,14 +1538,14 @@ void FormaEditor::drawCaptureBtn (juce::Graphics& g)
     }
     else
     {
-        g.setColour (juce::Colour (0xFF3A3528));
+        g.setColour (BORDER);
         g.drawRoundedRectangle (rf, rad, 1.0f);
         g.setColour (TXT_DIM);
     }
 
-    // "CAPTURE" — mono(10) gives evenly-letterspaced uppercase like the
-    // ADVANCED button. Visually balances the existing label family.
-    g.setFont (mono (10.0f));
+    // DM Sans Medium 10pt, letter-spaced 0.20em (≈ 0.25em visually with
+    // JUCE's kerning factor model). Matches the typography spec.
+    g.setFont (fontBodyMedium (10.0f).withExtraKerningFactor (0.20f));
     g.drawText ("CAPTURE", captureBtnRect, juce::Justification::centred);
 }
 

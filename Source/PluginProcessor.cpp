@@ -84,6 +84,13 @@ FormaProcessor::FormaProcessor()
         p.syncMode = 2; p.synthVolume = 0.7f;
         p.isEmpty = false;
     }
+
+    // Sync engine + atomics to the default mood's preset values. Without
+    // this the colorAmount atomic stays at its declared default (0.0),
+    // which doesn't match the editor's xyDot default (0.5, 0.5) — so the
+    // first chord press at startup uses tier 1 (triad) even though the
+    // pill label and dot position imply tier 2.
+    applyMoodDefaults (0);  // 0 = Bright (matches default currentMood).
 }
 
 void FormaProcessor::applySoundPreset (int preset)
@@ -948,7 +955,12 @@ void FormaProcessor::triggerChord (int degree, juce::uint8 inputVelocity,
     {
         juce::String rc;
         for (int n : rawChord) rc += juce::String (n) + " ";
-        DBG ("triggerChord: degree=" + juce::String (degree) + " getChord=[" + rc.trimEnd() + "]"
+        const float caEcho   = harmonyEngine.getColorAmount();
+        const int   tierEcho = harmonyEngine.getColorTier (degree, caEcho);
+        DBG ("triggerChord: degree=" + juce::String (degree)
+             + " color=" + juce::String (caEcho, 3)
+             + " tier="  + juce::String (tierEcho)
+             + " getChord=[" + rc.trimEnd() + "]"
              + " prevChordNotes.size=" + juce::String ((int) prevChordNotes.size()));
     }
 #endif

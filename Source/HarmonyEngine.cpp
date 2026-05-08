@@ -205,7 +205,7 @@ void HarmonyEngine::setMood (const juce::String& mood)
 
 void HarmonyEngine::setKey (int rootMidi)  { rootMidiNote = rootMidi; buildScale(); resetVoiceLeadingState(); }
 void HarmonyEngine::setExtensionTier (int tier) { extensionTier = juce::jlimit (1, 4, tier); }
-void HarmonyEngine::setColorAmount (float amount) { colorAmount = juce::jlimit (0.0f, 1.0f, amount); }
+void HarmonyEngine::setColorAmount (float amount) { colorAmount.store (juce::jlimit (0.0f, 1.0f, amount)); }
 void HarmonyEngine::setVoicing (int v) { voicingSetting = juce::jlimit (-5, 5, v); }
 
 // ── Build scale ────────────────────────────────────────────────────────────
@@ -274,18 +274,20 @@ std::vector<int> HarmonyEngine::getChord (int degree)
 {
     if (degree < 1 || degree > 7) return {};
 
+    const float ca = colorAmount.load();
+
     // Dusk degree III: dual quality based on Color
     if (currentMood == "Dusk" && degree == 3)
     {
         int thirdRoot = scaleMidi[2];  // Eb in C Dorian
         std::vector<int> chord;
-        if (colorAmount < 0.4f)
+        if (ca < 0.4f)
         {
             // IIImin7 — Eb minor quality (borrowed)
             chord.push_back (thirdRoot);
             chord.push_back (thirdRoot + 3);  // minor third (Gb)
             chord.push_back (thirdRoot + 7);  // fifth (Bb)
-            if (colorAmount >= 0.2f)
+            if (ca >= 0.2f)
                 chord.push_back (thirdRoot + 10);  // b7 (Db)
         }
         else
@@ -294,7 +296,7 @@ std::vector<int> HarmonyEngine::getChord (int degree)
             chord.push_back (thirdRoot);
             chord.push_back (thirdRoot + 4);  // major third (G)
             chord.push_back (thirdRoot + 7);  // fifth (Bb)
-            if (colorAmount >= 0.6f)
+            if (ca >= 0.6f)
                 chord.push_back (thirdRoot + 11);  // maj7 (D)
         }
         auto voiced = voice (chord);
@@ -304,7 +306,7 @@ std::vector<int> HarmonyEngine::getChord (int degree)
 
     int base = scaleMidi[(size_t) (degree - 1)];
     auto q = scaleQualities[(size_t) (degree - 1)];
-    int tier = getColorTier (degree, colorAmount);
+    int tier = getColorTier (degree, ca);
     auto triad = getTriad (q);
     auto& exts = extData[(size_t) (degree - 1)][tier];
     std::vector<int> notes;
@@ -322,7 +324,7 @@ std::vector<int> HarmonyEngine::getArpNotes (int degree)
     if (degree < 1 || degree > 7) return {};
     int base = scaleMidi[(size_t) (degree - 1)];
     auto q = scaleQualities[(size_t) (degree - 1)];
-    int tier = getColorTier (degree, colorAmount);
+    int tier = getColorTier (degree, colorAmount.load());
     auto triad = getTriad (q);
     auto& exts = extData[(size_t) (degree - 1)][tier];
     std::vector<int> notes;
@@ -343,7 +345,7 @@ int HarmonyEngine::getChordToneInterval (int degree, int toneIdx, int* outResolv
 
     auto q = scaleQualities[(size_t) (degree - 1)];
     auto triad = getTriad (q);  // { 0, 3rd, 5th }
-    int tier = getColorTier (degree, colorAmount);
+    int tier = getColorTier (degree, colorAmount.load());
     auto& exts = extData[(size_t) (degree - 1)][tier];
 
     // Extensions in computeExtensions are ordered { s7, s9, s13 } per tier.
@@ -535,7 +537,7 @@ int HarmonyEngine::findNearestOctaveDriftAware (int pc, int target, int lo, int 
     float baseCap = (cacheWeight >= 0.5f) ? 12.0f
                   : (cacheWeight >= 0.2f) ?  7.0f
                                           :  4.0f;
-    float effectiveCap = baseCap * (1.0f - colorAmount * 0.5f);
+    float effectiveCap = baseCap * (1.0f - colorAmount.load() * 0.5f);
     if (effectiveCap < 4.0f) effectiveCap = 4.0f;
     const int capInt = (int) std::round (effectiveCap);
 
@@ -551,8 +553,17 @@ int HarmonyEngine::findNearestOctaveDriftAware (int pc, int target, int lo, int 
     }
 
     // Cache override: ensure cached octave is in the candidate list when
-    // it's reachable within the cap.
-    if (cacheHint >= lo && cacheHint <= hi
+    // it's reachable within the cap. Gated on PC match — when the cached
+    // voice slot held a different pitch class than the one we're voicing
+    // now (e.g. previous chord was a triad doubling the root, current
+    // chord has a 7th in that voice slot), the cached MIDI value is
+    // musically meaningless and must NOT be injected. Without this gate
+    // a wrong-PC value lands in the candidate list with smooth=0 + pull=0
+    // and unconditionally wins, locking voicings to whatever was first
+    // committed regardless of subsequent color changes.
+    const bool hintPcMatches = ((cacheHint % 12) == (pc % 12));
+    if (hintPcMatches
+        && cacheHint >= lo && cacheHint <= hi
         && std::abs (cacheHint - target) <= capInt)
     {
         bool present = false;
@@ -564,7 +575,10 @@ int HarmonyEngine::findNearestOctaveDriftAware (int pc, int target, int lo, int 
     if (nCands == 0)
         return findNearestOctave (pc, target, lo, hi);
 
-    // Score: smoothness + cache pull + register pull (bass only).
+    // Score: smoothness + cache pull + register pull (bass only). Cache
+    // pull is also gated on PC match — a wrong-PC cacheHint provides no
+    // signal about where the current voice should sit and should not
+    // bias the cost.
     constexpr float cachePullWeight = 0.8f;
     int   best = cands[0];
     float bestCost = std::numeric_limits<float>::infinity();
@@ -572,7 +586,9 @@ int HarmonyEngine::findNearestOctaveDriftAware (int pc, int target, int lo, int 
     {
         int c = cands[i];
         float smooth  = (float) std::abs (c - target);
-        float pull    = (float) std::abs (c - cacheHint) * cacheWeight * cachePullWeight;
+        float pull    = hintPcMatches
+                          ? (float) std::abs (c - cacheHint) * cacheWeight * cachePullWeight
+                          : 0.0f;
         float regPull = pullToReg
                           ? alpha * (float) std::abs (c - registerTarget)
                           : 0.0f;
@@ -609,7 +625,7 @@ void HarmonyEngine::commitVoicingToCache (int degree, const std::vector<int>& v)
     slot.voicing[1]  = v[1];
     slot.voicing[2]  = v[2];
     slot.voicing[3]  = v[3];
-    slot.colorTier   = getColorTier (degree, colorAmount);
+    slot.colorTier   = getColorTier (degree, colorAmount.load());
     slot.ageInChords = 0.0f;
 
     cacheNextSlot = (cacheNextSlot + 1) % kCacheCapacity;
@@ -628,7 +644,7 @@ float HarmonyEngine::computeAttractionDelta (const int candidateNotes[4]) const
 {
     if (currentFunctionId < 0 || cacheSize == 0) return 0.0f;
 
-    const float decayRate = 0.05f + colorAmount * 0.45f;
+    const float decayRate = 0.05f + colorAmount.load() * 0.45f;
     constexpr float cacheAttractionWeight = 0.6f;
 
     float sum = 0.0f;
@@ -670,6 +686,7 @@ std::vector<int> HarmonyEngine::getUpperPCs (const std::vector<int>& chordTones)
 {
     if (chordTones.empty()) return {};
     int rootPC = chordTones[0] % 12;
+    const float ca = colorAmount.load();
 
     // Collect unique non-root pitch classes
     std::vector<int> pcs;
@@ -685,19 +702,26 @@ std::vector<int> HarmonyEngine::getUpperPCs (const std::vector<int>& chordTones)
     {
         // 9th chord: third, fifth, seventh, ninth
         // At high color drop fifth (jazz voicing), else drop ninth
-        if (colorAmount >= 0.5f)
+        if (ca >= 0.5f)
             pcs.erase (pcs.begin() + 1);  // remove fifth
         else
             pcs.resize (3);  // keep third, fifth, seventh
     }
 
-    // Pad if fewer than 3 (triad = 2 unique upper PCs)
+    // Pad if fewer than 3 (triad = 2 unique upper PCs).
+    // Standard SATB practice: double the ROOT, not duplicate the fifth —
+    // duplicating an upper PC caused two voices to land on the same MIDI
+    // note for triads (smoothness picks the same octave for both), and
+    // the synth dedup'd them into 3 audible notes. Doubling the root
+    // gives a fourth voice with a distinct PC so all 4 voices sound.
     while ((int) pcs.size() < 3)
     {
-        if (!pcs.empty())
-            pcs.push_back (pcs.back());  // double last
+        if (std::find (pcs.begin(), pcs.end(), rootPC) == pcs.end())
+            pcs.push_back (rootPC);              // first pad slot: doubled root
+        else if (!pcs.empty())
+            pcs.push_back (pcs.front());         // last resort: double the 3rd
         else
-            pcs.push_back (rootPC);  // emergency
+            pcs.push_back (rootPC);              // empty input — fall through
     }
     pcs.resize (3);
     return pcs;
@@ -727,7 +751,7 @@ std::vector<int> HarmonyEngine::getBestInversion (
         DBG ("voicingCache read: deg=" + juce::String (degree)
              + " size=" + juce::String (cacheSize)
              + " matches=" + juce::String (matches)
-             + " decay=" + juce::String (0.05f + colorAmount * 0.45f, 3));
+             + " decay=" + juce::String (0.05f + colorAmount.load() * 0.45f, 3));
     }
    #endif
 
@@ -742,7 +766,7 @@ std::vector<int> HarmonyEngine::getBestInversion (
     // Both prev and cached voicings are stored sorted, so voice index v
     // in current corresponds to voice v in cached.
     const CachedVoicing* cached = findRecentCachedEntry (currentFunctionId);
-    const float decayRate = 0.05f + colorAmount * 0.45f;
+    const float decayRate = 0.05f + colorAmount.load() * 0.45f;
     const float cacheWeight = cached ? std::exp (-cached->ageInChords * decayRate) : 0.0f;
     const int cachedBass = cached ? cached->voicing[0] : -1;
 
@@ -1034,7 +1058,7 @@ juce::String HarmonyEngine::getChordName (int degree)
     const auto* names = useFlats ? notesFlat : notesSharp;
     int rootIdx = (rootMidiNote + scaleIntervals[(size_t) (degree - 1)]) % 12;
     auto q = scaleQualities[(size_t) (degree - 1)];
-    int tier = getColorTier (degree, colorAmount);
+    int tier = getColorTier (degree, colorAmount.load());
     auto& exts = extData[(size_t) (degree - 1)][tier];
     auto suffix = buildSuffix (q, exts);
     static const char* romanUp[] = {"I","II","III","IV","V","VI","VII"};
