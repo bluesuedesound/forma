@@ -66,6 +66,11 @@ juce_add_binary_data(FormaData SOURCES
     Resources/packs/bright_lights/static_zone1.json
     Resources/packs/bright_lights/static_zone2.json
     Resources/packs/bright_lights/static_zone3.json
+    # ── Bundled typefaces (SIL Open Font License). ──
+    Resources/fonts/CormorantGaramond-Regular.ttf
+    Resources/fonts/CormorantGaramond-Italic.ttf
+    Resources/fonts/DMSans-Regular.ttf
+    Resources/fonts/DMSans-Medium.ttf
 )
 
 target_sources(Forma PRIVATE

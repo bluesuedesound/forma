@@ -1,15 +1,98 @@
 #include "PluginEditor.h"
+#include "BinaryData.h"
 using namespace C;
 
 const juce::StringArray FormaEditor::keyNames =
     { "C","Db","D","Eb","E","F","Gb","G","Ab","A","Bb","B" };
 
+// ── Bundled-typeface loader ───────────────────────────────────────────────
+
+void FormaEditor::loadBundledFonts()
+{
+    auto load = [] (const char* data, int size, const char* name) -> juce::Typeface::Ptr
+    {
+        if (data == nullptr || size <= 0)
+        {
+            DBG ("Font load failed (no data): " + juce::String (name));
+            return {};
+        }
+        auto tf = juce::Typeface::createSystemTypefaceFor (data, (size_t) size);
+        if (tf == nullptr)
+        {
+            DBG ("Font load failed (typeface null): " + juce::String (name));
+        }
+        else
+        {
+            DBG ("Font loaded: " + juce::String (name));
+        }
+        return tf;
+    };
+
+    tfDisplayRegular = load (BinaryData::CormorantGaramondRegular_ttf,
+                              BinaryData::CormorantGaramondRegular_ttfSize,
+                              "CormorantGaramond-Regular");
+    tfDisplayItalic  = load (BinaryData::CormorantGaramondItalic_ttf,
+                              BinaryData::CormorantGaramondItalic_ttfSize,
+                              "CormorantGaramond-Italic");
+    tfBodyRegular    = load (BinaryData::DMSansRegular_ttf,
+                              BinaryData::DMSansRegular_ttfSize,
+                              "DMSans-Regular");
+    tfBodyMedium     = load (BinaryData::DMSansMedium_ttf,
+                              BinaryData::DMSansMedium_ttfSize,
+                              "DMSans-Medium");
+}
+
+juce::Font FormaEditor::fontDisplayRegular (float size) const
+{
+    if (tfDisplayRegular != nullptr) return juce::Font (tfDisplayRegular).withHeight (size);
+    return juce::Font (juce::Font::getDefaultSerifFontName(), size, juce::Font::plain);
+}
+
+juce::Font FormaEditor::fontDisplayItalic (float size) const
+{
+    if (tfDisplayItalic != nullptr) return juce::Font (tfDisplayItalic).withHeight (size);
+    return juce::Font (juce::Font::getDefaultSerifFontName(), size, juce::Font::italic);
+}
+
+juce::Font FormaEditor::fontDisplayMedium (float size) const
+{
+    // Cormorant Medium TTF not yet bundled — fall through to Regular.
+    return fontDisplayRegular (size);
+}
+
+juce::Font FormaEditor::fontDisplayMediumItalic (float size) const
+{
+    // Cormorant MediumItalic TTF not yet bundled — fall through to Italic.
+    return fontDisplayItalic (size);
+}
+
+juce::Font FormaEditor::fontBody (float size) const
+{
+    if (tfBodyRegular != nullptr) return juce::Font (tfBodyRegular).withHeight (size);
+    return juce::Font (juce::Font::getDefaultSansSerifFontName(), size, juce::Font::plain);
+}
+
+juce::Font FormaEditor::fontBodyMedium (float size) const
+{
+    if (tfBodyMedium != nullptr) return juce::Font (tfBodyMedium).withHeight (size);
+    return juce::Font (juce::Font::getDefaultSansSerifFontName(), size, juce::Font::bold);
+}
+
+// ── Legacy shims ──────────────────────────────────────────────────────────
+// Existing call sites use mono(h) for ALL labels (section headers, mode
+// pills, key letter, BPM, etc) and sans(h, bold) only for chord names.
+// Routing: mono → fontBody (DM Sans). sans(_, true) → fontDisplayItalic
+// (the chord-name pill text). sans(_, false) → fontBody.
 juce::Font FormaEditor::mono (float h) const
-{ return juce::Font (juce::Font::getDefaultMonospacedFontName(), h, juce::Font::plain); }
+{
+    return fontBody (h);
+}
 
 juce::Font FormaEditor::sans (float h, bool bold) const
-{ return juce::Font (juce::Font::getDefaultSansSerifFontName(), h,
-                     bold ? juce::Font::bold : juce::Font::plain); }
+{
+    if (bold) return fontDisplayItalic (h);
+    return fontBody (h);
+}
 
 // Helper: interpolate two colours by t
 static juce::Colour lerpColour (juce::Colour a, juce::Colour b, float t)
@@ -91,6 +174,9 @@ FormaEditor::FormaEditor (FormaProcessor& p)
     currentSyncMode = proc.syncMode.load();
     currentBgColor = juce::Colour (kMoods[0].bgColor);
     targetBgColor  = currentBgColor;
+
+    // Bundled typefaces (Cormorant Garamond + DM Sans).
+    loadBundledFonts();
 
     // Build grain tile once. 256x256, tile-able, warm-tinted.
     buildGrainTile();
@@ -432,21 +518,25 @@ void FormaEditor::paint (juce::Graphics& g)
     int padY = compassContainer.getCentreY() - padSize / 2;
     xyPadCircle = juce::Rectangle<int> (padX, padY, padSize, padSize);
 
-    // Chord keys: 7 equal width across the bottom of centerCol.
+    // Chord keys: 7 equal width across the bottom of centerCol. ckH was
+    // 154; reduced to 138 to make room for a properly-sized Capture
+    // button below the row in the gap above the status bar. Pill text
+    // is bottom-anchored so the visual reads identically.
     int ckY = centerCol.getY() + circleAreaH;
-    int ckH = 154;
+    int ckH = 138;
     int ckGap = 5;
     int ckTotalW = centerCol.getWidth();
     int ckW = (ckTotalW - ckGap * 6) / 7;
     for (int i = 0; i < 7; ++i)
         chordKeyRects[i] = juce::Rectangle<int> (centerCol.getX() + i * (ckW + ckGap), ckY + 14, ckW, ckH);
 
-    // Capture button — bottom-right of pill row, in the gap above the
-    // status bar. Visible only in Sketch mode but rect always layouted.
+    // Capture button — bottom-right of pill row area. Sized to match
+    // the ADVANCED button in the title bar (subtle bordered pill,
+    // 80×22). Visible only in Sketch mode.
     {
-        const int capW = 72, capH = 11;
+        const int capW = 80, capH = 22;
         captureBtnRect = juce::Rectangle<int> (centerCol.getRight() - capW - 4,
-                                                ckY + 14 + ckH + 1,
+                                                ckY + 14 + ckH + 4,
                                                 capW, capH);
     }
 
@@ -495,8 +585,10 @@ void FormaEditor::drawTopBar (juce::Graphics& g)
     g.setColour (BORDER);
     g.drawHorizontalLine (r.getBottom() - 1, 0.0f, (float) getWidth());
 
-    // Letterpress logo
-    g.setFont (mono (15.0f));
+    // Letterpress logo — Cormorant Garamond Regular at the same visual
+    // weight (slight bump from 15 to 17 to keep wordmark presence
+    // against the existing letterspaced "F O R M A" composition).
+    g.setFont (fontDisplayRegular (17.0f));
     auto logo = r.withTrimmedLeft (18);
     g.setColour (juce::Colour (0xFF0A0908));
     g.drawText ("F O R M A", logo.translated (1, 1), juce::Justification::centredLeft);
@@ -553,8 +645,8 @@ void FormaEditor::drawTopBar (juce::Graphics& g)
                 gearBtnRect, juce::Justification::centred);
     rx -= gearW + 14;
 
-    // BPM
-    g.setFont (mono (10.0f));
+    // BPM — Cormorant Italic display number, body label.
+    g.setFont (fontDisplayItalic (13.0f));
     g.setColour (TXT_MID);
     juce::String bpmVal = juce::String (currentBpm, 1);
     g.drawText (bpmVal, juce::Rectangle<int> (rx - 50, r.getY(), 50, r.getHeight()),
@@ -636,8 +728,9 @@ void FormaEditor::drawLeftCol (juce::Graphics& g)
             g.drawRoundedRectangle (pr.toFloat(), 4.0f, 1.0f);
         }
 
-        // Text
-        g.setFont (mono (11.0f));
+        // Text — Cormorant Italic for the mood name (the character of
+        // the typography is part of the mood vocabulary).
+        g.setFont (fontDisplayItalic (14.0f));
         if (active)
             g.setColour (ACCENT);
         else if (hover)
@@ -690,8 +783,8 @@ void FormaEditor::drawLeftCol (juce::Graphics& g)
     g.setColour (TXT_DIM);
     g.drawText (juce::String (juce::CharPointer_UTF8 ("\xe2\x96\xbc")), downR, juce::Justification::centred);
 
-    // Key name (centered)
-    g.setFont (mono (26.0f));
+    // Key name (centered) — Cormorant Regular hero at large size.
+    g.setFont (fontDisplayRegular (30.0f));
     g.setColour (TXT_HI);
     g.drawText (keyNames[keyIdx], juce::Rectangle<int> (px + 24, bottomY - 4, 70, 28), juce::Justification::centred);
 
@@ -741,8 +834,8 @@ void FormaEditor::drawLeftCol (juce::Graphics& g)
 
     bottomY += 22;
 
-    // Mood description
-    g.setFont (mono (9.0f));
+    // Mood description — italic display for the descriptor phrase.
+    g.setFont (fontDisplayItalic (11.0f));
     g.setColour (ACCENT);
     g.drawText (juce::String (juce::CharPointer_UTF8 (kMoods[moodIdx].desc)),
                 juce::Rectangle<int> (px, bottomY, 123, 14), juce::Justification::centredLeft);
@@ -1276,10 +1369,12 @@ void FormaEditor::drawChordKey (juce::Graphics& g, juce::Rectangle<int> r, int i
 void FormaEditor::drawComposeStep (juce::Graphics& g, juce::Rectangle<int> r,
                                     int idx, int playingStep)
 {
-    const int  degree   = proc.composeSteps[(size_t) idx].degree.load();
-    const int  duration = proc.composeSteps[(size_t) idx].duration.load();
-    const bool isActive = (degree >= 1 && degree <= 7);
+    const int  degree    = proc.composeSteps[(size_t) idx].degree.load();
+    const int  duration  = proc.composeSteps[(size_t) idx].duration.load();
+    const bool isActive  = (degree >= 1 && degree <= 7);
     const bool isPlaying = (idx == playingStep);
+    const bool isSelected= (idx == selectedStepIdx);
+    const bool isHovered = (idx == hoveredStepIdx) && ! isPlaying;
     const float rad = 6.0f;
     auto rf = r.toFloat();
 
@@ -1314,13 +1409,23 @@ void FormaEditor::drawComposeStep (juce::Graphics& g, juce::Rectangle<int> r,
         g.reduceClipRegion (clip);
         g.fillAll();
     }
+    else if (isHovered)
+    {
+        g.setColour (juce::Colour::fromFloatRGBA (1.0f, 0.92f, 0.78f, 0.025f));
+        g.fillRoundedRectangle (rf, rad);
+    }
 
-    // Border — amber when active, ghost when off.
+    // Border. Playing > selected > active > off.
     if (isPlaying)
     {
         g.setColour (LofiC::AMBER.withAlpha (0.25f));
         g.drawRoundedRectangle (rf.expanded (1.5f), rad + 1.5f, 1.5f);
         g.setColour (LofiC::AMBER);
+        g.drawRoundedRectangle (rf, rad, 1.2f);
+    }
+    else if (isSelected)
+    {
+        g.setColour (juce::Colour (0xFF6A4A28));
         g.drawRoundedRectangle (rf, rad, 1.2f);
     }
     else if (isActive)
@@ -1336,38 +1441,46 @@ void FormaEditor::drawComposeStep (juce::Graphics& g, juce::Rectangle<int> r,
 
     if (isActive)
     {
-        // Roman numeral, italic Cormorant-spirit (sans italic stand-in).
+        // ── Roman numeral (italic, prominent) — upper 60% of cell ──
         static const char* up[] = { "I", "II", "III", "IV", "V", "VI", "VII" };
         juce::String roman = juce::String (up[juce::jlimit (0, 6, degree - 1)]);
-        // Quality (re-use harmonyEngine for diatonic variant).
         auto q = proc.harmonyEngine.getChordQuality (degree);
-        if (q == "m" || q == "d")
-            roman = roman.toLowerCase();
+        if (q == "m" || q == "d") roman = roman.toLowerCase();
         if (q == "d") roman += juce::String (juce::CharPointer_UTF8 ("\xc2\xb0"));
         if (q == "A") roman += "+";
 
-        g.setFont (juce::Font (juce::Font::getDefaultSansSerifFontName(), 20.0f,
-                                juce::Font::italic));
-        g.setColour (isPlaying ? LofiC::INK_HERO : juce::Colour (0xFFB89878));
-        g.drawText (roman, r.withTrimmedBottom (16), juce::Justification::centred);
+        // Cormorant Garamond Italic — bundled at editor construction.
+        g.setFont (fontDisplayItalic (22.0f));
+        g.setColour (isPlaying ? LofiC::INK_HERO : juce::Colour (0xFFC0A488));
+        const int upperH = (int) (r.getHeight() * 0.60f);
+        g.drawText (roman,
+                    juce::Rectangle<int> (r.getX(), r.getY(), r.getWidth(), upperH),
+                    juce::Justification::centred);
 
-        // Duration label at bottom (e.g., "4 ♩" → use beat count + tag).
-        juce::String durTag;
-        if      (duration == 1)  durTag = "1";
-        else if (duration == 2)  durTag = "2";
-        else if (duration == 4)  durTag = "4";
-        else if (duration == 8)  durTag = "8";
-        else if (duration == 16) durTag = "16";
-        else                     durTag = juce::String (duration);
-        g.setFont (mono (8.0f));
-        g.setColour (isPlaying ? juce::Colour (0xFFD8A878) : TXT_DIM);
-        g.drawText (durTag + " " + juce::String (juce::CharPointer_UTF8 ("\xe2\x99\xa9")),
-                    juce::Rectangle<int> (r.getX(), r.getBottom() - 14, r.getWidth(), 12),
+        // ── Duration label — lower 40%, mono(10) for letterspaced look ──
+        juce::String durStr;
+        switch (duration)
+        {
+            case 1:  durStr = "1/4"; break;
+            case 2:  durStr = "1/2"; break;
+            case 4:  durStr = "1";   break;
+            case 8:  durStr = "2";   break;
+            case 16: durStr = "4";   break;
+            default: durStr = juce::String (duration);
+        }
+        g.setFont (mono (10.0f));
+        g.setColour (isPlaying ? juce::Colour (0xFFD8A878)
+                                : juce::Colour (0xFF8C7A65));
+        g.drawText (durStr,
+                    juce::Rectangle<int> (r.getX(),
+                                            r.getY() + upperH,
+                                            r.getWidth(),
+                                            r.getHeight() - upperH),
                     juce::Justification::centred);
     }
     else
     {
-        // Dim dot for an "off" step.
+        // Off — dim dot only.
         float cx = rf.getCentreX();
         float cy = rf.getCentreY();
         g.setColour (juce::Colour (0xFF3A332A));
@@ -1390,22 +1503,68 @@ void FormaEditor::drawStepGrid (juce::Graphics& g)
 void FormaEditor::drawCaptureBtn (juce::Graphics& g)
 {
     auto rf = captureBtnRect.toFloat();
+    const float rad = 4.0f;
     const bool flashing = (captureFlashTimer > 0.0f);
+    const bool hover    = captureHovered;
+
+    // Subtle filled pill matching the ADVANCED button family (bordered,
+    // grain inside, dim resting state). Hover brightens border to amber;
+    // flashing fades amber glow back over ~600ms.
+    {
+        juce::ColourGradient bg (juce::Colour (0xFF1A1814), rf.getX(), rf.getY(),
+                                 juce::Colour (0xFF131110), rf.getX(), rf.getBottom(), false);
+        g.setGradientFill (bg);
+        g.fillRoundedRectangle (rf, rad);
+    }
+
+    // Grain inside, masked to the rounded rect.
+    {
+        juce::Path clip;
+        clip.addRoundedRectangle (rf, rad);
+        juce::Graphics::ScopedSaveState ss (g);
+        g.reduceClipRegion (clip);
+        drawGrainOverlay (g, captureBtnRect, 0.07f);
+    }
+
+    // Amber flash glow during the post-capture confirmation window.
     if (flashing)
     {
-        g.setColour (LofiC::AMBER.withAlpha (0.18f));
-        g.fillRoundedRectangle (rf, 3.0f);
+        const float a = juce::jlimit (0.0f, 1.0f, captureFlashTimer / 0.6f);
+        juce::ColourGradient glow (LofiC::AMBER.withAlpha (0.30f * a),
+                                    rf.getCentreX(), rf.getBottom(),
+                                    LofiC::AMBER.withAlpha (0.0f),
+                                    rf.getCentreX(), rf.getY(), false);
+        g.setGradientFill (glow);
+        juce::Path clip;
+        clip.addRoundedRectangle (rf, rad);
+        juce::Graphics::ScopedSaveState ss (g);
+        g.reduceClipRegion (clip);
+        g.fillAll();
+    }
+
+    // Border + label.
+    if (flashing)
+    {
         g.setColour (LofiC::AMBER);
-        g.drawRoundedRectangle (rf, 3.0f, 1.0f);
+        g.drawRoundedRectangle (rf, rad, 1.0f);
         g.setColour (LofiC::INK_HERO);
+    }
+    else if (hover)
+    {
+        g.setColour (LofiC::AMBER_SOFT);
+        g.drawRoundedRectangle (rf, rad, 1.0f);
+        g.setColour (juce::Colour (0xFFD2A878));
     }
     else
     {
-        g.setColour (BORDER);
-        g.drawRoundedRectangle (rf, 3.0f, 1.0f);
+        g.setColour (juce::Colour (0xFF3A3528));
+        g.drawRoundedRectangle (rf, rad, 1.0f);
         g.setColour (TXT_DIM);
     }
-    g.setFont (mono (8.0f));
+
+    // "CAPTURE" — mono(10) gives evenly-letterspaced uppercase like the
+    // ADVANCED button. Visually balances the existing label family.
+    g.setFont (mono (10.0f));
     g.drawText ("CAPTURE", captureBtnRect, juce::Justification::centred);
 }
 
@@ -1421,28 +1580,31 @@ void FormaEditor::drawStatusBar (juce::Graphics& g)
     g.setColour (BORDER);
     g.drawHorizontalLine (r.getY(), 0.0f, (float) getWidth());
 
-    g.setFont (mono (9.0f));
-
-    // Left: chord name
+    // Left: chord name — Cormorant Italic display.
+    g.setFont (fontDisplayItalic (12.0f));
     g.setColour (ACCENT);
     g.drawText (statusChord, r.withTrimmedLeft (14).withWidth (200), juce::Justification::centredLeft);
 
-    // Center: progression
+    // Center: progression — body face.
     if (proc.currentProgressionName.isNotEmpty())
     {
+        g.setFont (fontBody (10.0f));
         g.setColour (ACCENT_DK);
         g.drawText (proc.currentProgressionName, r, juce::Justification::centred);
     }
 
-    // Right: key suggestion or context
+    // Right: key suggestion or context — italic display reads as the
+    // mood/key signature ("warm · F · harmonic"), not a label.
     if (proc.keySuggestionActive && proc.keySuggestion.isNotEmpty())
     {
+        g.setFont (fontDisplayItalic (11.0f));
         g.setColour (ACCENT_DK);
         g.drawText (proc.keySuggestion, r.withTrimmedRight (14), juce::Justification::centredRight);
     }
     else
     {
         const char* syncNames[] = { "full sync", "expressive", "harmonic", "free" };
+        g.setFont (fontDisplayItalic (11.0f));
         g.setColour (TXT_GHOST);
         juce::String info = juce::String (juce::CharPointer_UTF8 (kMoods[moodIdx].name))
                             + juce::String (juce::CharPointer_UTF8 (" \xc2\xb7 "))
@@ -1747,13 +1909,28 @@ void FormaEditor::mouseMove (const juce::MouseEvent& e)
     }
     hoveredMoodIdx = newHoveredMood;
 
-    // Chord hover
+    // Chord hover (Sketch mode only)
     int newHoveredChord = -1;
-    for (int i = 0; i < 7; ++i)
+    if (composeModeUI == 0)
     {
-        if (chordKeyRects[i].contains (pos)) { newHoveredChord = i; break; }
+        for (int i = 0; i < 7; ++i)
+        {
+            if (chordKeyRects[i].contains (pos)) { newHoveredChord = i; break; }
+        }
     }
     hoveredChordIdx = newHoveredChord;
+
+    // Capture button hover (Sketch mode only)
+    captureHovered = (composeModeUI == 0) && captureBtnRect.contains (pos);
+
+    // Step hover (Compose mode only)
+    int newHoveredStep = -1;
+    if (composeModeUI == 1)
+    {
+        for (int i = 0; i < 16; ++i)
+            if (stepRects[i].contains (pos)) { newHoveredStep = i; break; }
+    }
+    hoveredStepIdx = newHoveredStep;
 }
 
 void FormaEditor::mouseDown (const juce::MouseEvent& e)
@@ -2010,6 +2187,7 @@ void FormaEditor::mouseDown (const juce::MouseEvent& e)
                     int next = (cur + 1) % 8;
                     proc.composeSteps[(size_t) i].degree.store (next);
                 }
+                selectedStepIdx = i;
                 repaint();
                 return;
             }

@@ -148,6 +148,11 @@ private:
     // ── Capture button (visible in Sketch mode) ──
     juce::Rectangle<int> captureBtnRect;
     float captureFlashTimer = 0.0f;  // post-press feedback flash
+    bool  captureHovered    = false;
+
+    // ── Compose step grid: hover + last-edited (selected) tracking ──
+    int   hoveredStepIdx = -1;
+    int   selectedStepIdx = -1;
 
     // Gear button rect
     juce::Rectangle<int> gearBtnRect;
@@ -187,7 +192,28 @@ private:
     int   bassTrigNoteUI  = 0;
     float bassVariationUI = 0.30f;
 
-    // Font helper
+    // ── Bundled typefaces (loaded once in the constructor). nullptr if
+    // the binary blob fails to load — helpers fall back to system serif /
+    // sans-serif gracefully.
+    juce::Typeface::Ptr tfDisplayRegular;   // Cormorant Garamond Regular
+    juce::Typeface::Ptr tfDisplayItalic;    // Cormorant Garamond Italic
+    juce::Typeface::Ptr tfBodyRegular;      // DM Sans Regular
+    juce::Typeface::Ptr tfBodyMedium;       // DM Sans Medium
+    void loadBundledFonts();
+
+    // Font helpers — typography by intent. Each returns a juce::Font at
+    // the requested size, falling back to a system family if the bundled
+    // typeface didn't load.
+    juce::Font fontDisplayRegular (float size) const;        // Cormorant
+    juce::Font fontDisplayItalic  (float size) const;        // Cormorant Italic
+    juce::Font fontDisplayMedium  (float size) const;        // alias to Regular until Medium TTF added
+    juce::Font fontDisplayMediumItalic (float size) const;   // alias to Italic until MediumItalic TTF added
+    juce::Font fontBody           (float size) const;        // DM Sans Regular
+    juce::Font fontBodyMedium     (float size) const;        // DM Sans Medium
+
+    // Legacy shims kept so existing callsites compile during the sweep.
+    // mono(...) routes to fontBody (label face); sans(...) routes to
+    // fontDisplayItalic when bold (chord names) and fontBody otherwise.
     juce::Font mono (float h) const;
     juce::Font sans (float h, bool bold = false) const;
 
