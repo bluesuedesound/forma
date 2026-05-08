@@ -95,8 +95,11 @@ public:
     std::atomic<int> composeMode { 0 };
 
     struct ComposeStep {
-        std::atomic<int> degree   { 0 };  // 0=off, 1..7
-        std::atomic<int> duration { 4 };  // quarter-note beats: 1,2,4,8,16
+        std::atomic<int> degree       { 0 };  // 0=off, 1..7
+        std::atomic<int> duration     { 4 };  // quarter beats: 1,2,3,4,6,8,12,16
+        std::atomic<int> articulation { 0 };  // 0=Sustain, 1=Stab, 2=Pulse
+        std::atomic<int> rhythmPattern{ 0 };  // 0=None, 1=Beats, 2=1and3,
+                                              // 3=Offbeats, 4=Eighths, 5=Sixteenths
     };
     static constexpr int kComposeSteps = 16;
     std::array<ComposeStep, kComposeSteps> composeSteps;
@@ -238,8 +241,10 @@ private:
     float  currentBeatPosition  = 0.0f;
 
     // Compose playback state (audio thread only).
-    int  composeCurrentStep   = -1;   // step index currently held
-    int  composeActiveDegree  = -1;   // degree currently sounding via Compose
+    int  composeCurrentStep      = -1;   // step index currently held
+    int  composeActiveDegree     = -1;   // degree currently sounding via Compose
+    int  composeCurrentEventIdx  = -1;   // sub-step rhythm event index (within current step)
+    double composeReleaseDueBeat = 0.0;  // step-relative beat at which to release chord
     void updateComposePlayback (juce::MidiBuffer& out, int samplePosition,
                                  bool isPlaying, double ppq);
     void releaseComposeChord  (juce::MidiBuffer& out, int samplePosition);

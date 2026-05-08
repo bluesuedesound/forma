@@ -541,22 +541,58 @@ void FormaEditor::paint (juce::Graphics& g)
                                                 capW, capH);
     }
 
-    // Compose step grid — 2 rows × 8 cols, fills the same area as chord pills.
+    // Compose step grid — 2 rows × 8 cols. Row height shrunk vs the
+    // chord-pill row so a selected-step panel fits below.
+    const int stepRowGap = 5;
+    const int stepRowH   = 42;
+    const int stepGridH  = stepRowH * 2 + stepRowGap;       // = 89
+    const int stepCols   = 8;
+    const int stepW      = (ckTotalW - stepRowGap * (stepCols - 1)) / stepCols;
     {
-        const int gap  = 5;
-        const int cols = 8, rows = 2;
-        const int sGridW = ckTotalW;
-        const int sGridH = ckH;
-        const int sw = (sGridW - gap * (cols - 1)) / cols;
-        const int sh = (sGridH - gap * (rows - 1)) / rows;
         for (int i = 0; i < 16; ++i)
         {
-            int row = i / cols;
-            int col = i % cols;
-            int x = centerCol.getX() + col * (sw + gap);
-            int y = ckY + 14 + row * (sh + gap);
-            stepRects[i] = juce::Rectangle<int> (x, y, sw, sh);
+            int row = i / stepCols;
+            int col = i % stepCols;
+            int x = centerCol.getX() + col * (stepW + stepRowGap);
+            int y = ckY + 14 + row * (stepRowH + stepRowGap);
+            stepRects[i] = juce::Rectangle<int> (x, y, stepW, stepRowH);
         }
+    }
+
+    // Selected-step panel — sits below the step grid.
+    {
+        const int panelTopGap = 8;
+        const int panelY = ckY + 14 + stepGridH + panelTopGap;   // y = 471
+        const int panelH = 56;                                    // bottom = 527
+        selectedPanelRect = juce::Rectangle<int> (centerCol.getX() + 4, panelY,
+                                                    centerCol.getWidth() - 8, panelH);
+
+        // Sub-control layout: STEP X · DEGREE [<][I][>] · DURATION [<][1][>]
+        // · ARTIC · RHYTHM. Computed left-to-right with consistent spacing.
+        const int innerY = panelY + 8;
+        const int innerH = panelH - 16;
+        const int chevW  = 18;
+        const int valW   = 32;
+        int x = selectedPanelRect.getX() + 78;   // leaves room for "STEP X OF 16"
+
+        // Degree control
+        panelDegLeftRect  = juce::Rectangle<int> (x,             innerY, chevW, innerH);
+        panelDegValRect   = juce::Rectangle<int> (x + chevW,     innerY, valW,  innerH);
+        panelDegRightRect = juce::Rectangle<int> (x + chevW + valW, innerY, chevW, innerH);
+        x += chevW + valW + chevW + 22;
+
+        // Duration control
+        panelDurLeftRect  = juce::Rectangle<int> (x,             innerY, chevW, innerH);
+        panelDurValRect   = juce::Rectangle<int> (x + chevW,     innerY, valW + 8, innerH);
+        panelDurRightRect = juce::Rectangle<int> (x + chevW + valW + 8, innerY, chevW, innerH);
+        x += chevW + valW + 8 + chevW + 22;
+
+        // Articulation pill (cycles on click)
+        panelArticRect = juce::Rectangle<int> (x, innerY, 76, innerH);
+        x += 76 + 8;
+
+        // Rhythm pill (cycles on click)
+        panelRhythmRect = juce::Rectangle<int> (x, innerY, 88, innerH);
     }
 
     g.fillAll (BG4);
@@ -863,6 +899,7 @@ void FormaEditor::drawCenter (juce::Graphics& g)
     if (composeModeUI == 1)
     {
         drawStepGrid (g);
+        drawSelectedStepPanel (g);
     }
     else
     {
@@ -1458,14 +1495,17 @@ void FormaEditor::drawComposeStep (juce::Graphics& g, juce::Rectangle<int> r,
                     juce::Rectangle<int> (r.getX(), r.getY(), r.getWidth(), upperH),
                     juce::Justification::centred);
 
-        // ── Duration label — lower 40%, mono(10) for letterspaced look ──
+        // ── Duration label — lower 40%, body face for legibility ──
         juce::String durStr;
         switch (duration)
         {
             case 1:  durStr = "1/4"; break;
             case 2:  durStr = "1/2"; break;
+            case 3:  durStr = "3/4"; break;
             case 4:  durStr = "1";   break;
+            case 6:  durStr = "1.5"; break;
             case 8:  durStr = "2";   break;
+            case 12: durStr = "3";   break;
             case 16: durStr = "4";   break;
             default: durStr = juce::String (duration);
         }
@@ -1494,6 +1534,154 @@ void FormaEditor::drawStepGrid (juce::Graphics& g)
     const int playingStep = proc.composeDisplayStep.load();
     for (int i = 0; i < 16; ++i)
         drawComposeStep (g, stepRects[i], i, playingStep);
+}
+
+// ═════════════════════════════════════════════════════════════════════════
+// SELECTED-STEP PANEL  (Compose mode, below step grid)
+// ═════════════════════════════════════════════════════════════════════════
+
+static const char* kArticNames[] = { "SUSTAIN", "STAB", "PULSE" };
+static const char* kRhythmNames[] = { "NONE", "BEATS", "1 & 3", "OFFBEATS", "EIGHTHS", "SIXTEENTHS" };
+
+static juce::String composeDurString (int dur)
+{
+    switch (dur)
+    {
+        case 1:  return "1/4";
+        case 2:  return "1/2";
+        case 3:  return "3/4";
+        case 4:  return "1";
+        case 6:  return "1.5";
+        case 8:  return "2";
+        case 12: return "3";
+        case 16: return "4";
+        default: return juce::String (dur);
+    }
+}
+
+void FormaEditor::drawSelectedStepPanel (juce::Graphics& g)
+{
+    auto rf = selectedPanelRect.toFloat();
+
+    // Panel surface — subtle bordered card consistent with other lofi
+    // surfaces. BG2 fill, BORDER outline, light grain.
+    g.setColour (BG2);
+    g.fillRoundedRectangle (rf, 6.0f);
+    {
+        juce::Path clip;
+        clip.addRoundedRectangle (rf, 6.0f);
+        juce::Graphics::ScopedSaveState ss (g);
+        g.reduceClipRegion (clip);
+        drawGrainOverlay (g, selectedPanelRect, 0.05f);
+    }
+    g.setColour (BORDER);
+    g.drawRoundedRectangle (rf, 6.0f, 1.0f);
+
+    if (selectedStepIdx < 0 || selectedStepIdx >= 16)
+    {
+        // Placeholder.
+        g.setFont (fontBody (10.0f).withExtraKerningFactor (0.20f));
+        g.setColour (TXT_DIM);
+        g.drawText ("SELECT A STEP TO EDIT", selectedPanelRect, juce::Justification::centred);
+        return;
+    }
+
+    const int idx = selectedStepIdx;
+    const int degree   = proc.composeSteps[(size_t) idx].degree.load();
+    const int duration = proc.composeSteps[(size_t) idx].duration.load();
+    const int artic    = proc.composeSteps[(size_t) idx].articulation.load();
+    const int rhythm   = proc.composeSteps[(size_t) idx].rhythmPattern.load();
+    const bool stepOff = (degree == 0);
+
+    // Step indicator: "STEP n OF 16" small caps left-aligned.
+    {
+        g.setFont (fontBody (9.0f).withExtraKerningFactor (0.22f));
+        g.setColour (TXT_GHOST);
+        juce::String label = "STEP " + juce::String (idx + 1) + " OF 16";
+        g.drawText (label,
+                    juce::Rectangle<int> (selectedPanelRect.getX() + 14,
+                                            selectedPanelRect.getY() + 8,
+                                            70,
+                                            selectedPanelRect.getHeight() - 16),
+                    juce::Justification::centredLeft);
+    }
+
+    auto drawChev = [&] (juce::Rectangle<int> r, juce::CharPointer_UTF8 glyph, bool dim)
+    {
+        g.setColour (dim ? TXT_DARK : TXT_DIM);
+        g.setFont (fontBody (10.0f));
+        g.drawText (juce::String (glyph), r, juce::Justification::centred);
+    };
+
+    auto drawSectionLabel = [&] (juce::Rectangle<int> r, const char* txt, bool dim)
+    {
+        g.setFont (fontBody (8.0f).withExtraKerningFactor (0.22f));
+        g.setColour (dim ? TXT_DARK : TXT_GHOST);
+        g.drawText (txt,
+                    juce::Rectangle<int> (r.getX(), r.getY() - 12, r.getWidth(), 10),
+                    juce::Justification::centredLeft);
+    };
+
+    // ── DEGREE ──
+    drawSectionLabel (panelDegLeftRect, "DEGREE", false);
+    drawChev (panelDegLeftRect,  juce::CharPointer_UTF8 ("\xe2\x80\xb9"), false);   // ‹
+    drawChev (panelDegRightRect, juce::CharPointer_UTF8 ("\xe2\x80\xba"), false);   // ›
+    {
+        static const char* up[] = { "I", "II", "III", "IV", "V", "VI", "VII" };
+        juce::String roman;
+        if (stepOff) roman = juce::CharPointer_UTF8 ("\xe2\x80\x94");  // — em-dash
+        else
+        {
+            roman = up[juce::jlimit (0, 6, degree - 1)];
+            auto q = proc.harmonyEngine.getChordQuality (degree);
+            if (q == "m" || q == "d") roman = roman.toLowerCase();
+            if (q == "d") roman += juce::String (juce::CharPointer_UTF8 ("\xc2\xb0"));
+            if (q == "A") roman += "+";
+        }
+        g.setFont (fontDisplayItalic (18.0f));
+        g.setColour (stepOff ? TXT_DIM : LofiC::INK_HERO);
+        g.drawText (roman, panelDegValRect, juce::Justification::centred);
+    }
+
+    // ── DURATION ──
+    drawSectionLabel (panelDurLeftRect, "DURATION", false);
+    drawChev (panelDurLeftRect,  juce::CharPointer_UTF8 ("\xe2\x80\xb9"), false);
+    drawChev (panelDurRightRect, juce::CharPointer_UTF8 ("\xe2\x80\xba"), false);
+    {
+        g.setFont (fontDisplayItalic (16.0f));
+        g.setColour (LofiC::INK_HERO);
+        g.drawText (composeDurString (duration), panelDurValRect, juce::Justification::centred);
+    }
+
+    // ── ARTICULATION ──
+    {
+        const bool dim = stepOff;
+        drawSectionLabel (panelArticRect, "ARTICULATION", dim);
+        auto pr = panelArticRect.toFloat();
+        g.setColour (BG4);
+        g.fillRoundedRectangle (pr, 4.0f);
+        g.setColour (dim ? juce::Colour (0xFF221E18) : BORDER);
+        g.drawRoundedRectangle (pr, 4.0f, 1.0f);
+        g.setFont (fontBody (9.0f).withExtraKerningFactor (0.22f));
+        g.setColour (dim ? TXT_DARK : TXT_DIM);
+        g.drawText (kArticNames[juce::jlimit (0, 2, artic)],
+                    panelArticRect, juce::Justification::centred);
+    }
+
+    // ── RHYTHM ──
+    {
+        const bool dim = stepOff;
+        drawSectionLabel (panelRhythmRect, "RHYTHM", dim);
+        auto pr = panelRhythmRect.toFloat();
+        g.setColour (BG4);
+        g.fillRoundedRectangle (pr, 4.0f);
+        g.setColour (dim ? juce::Colour (0xFF221E18) : BORDER);
+        g.drawRoundedRectangle (pr, 4.0f, 1.0f);
+        g.setFont (fontBody (9.0f).withExtraKerningFactor (0.22f));
+        g.setColour (dim ? TXT_DARK : TXT_DIM);
+        g.drawText (kRhythmNames[juce::jlimit (0, 5, rhythm)],
+                    panelRhythmRect, juce::Justification::centred);
+    }
 }
 
 // ═════════════════════════════════════════════════════════════════════════
@@ -2152,12 +2340,15 @@ void FormaEditor::mouseDown (const juce::MouseEvent& e)
             {
                 if (isRight)
                 {
-                    // Cycle duration: 1 → 2 → 4 → 8 → 16 → 1
+                    // Cycle duration: 1 → 2 → 3 → 4 → 6 → 8 → 12 → 16 → 1
                     int cur = proc.composeSteps[(size_t) i].duration.load();
                     int next = (cur == 1)  ? 2
-                            : (cur == 2)  ? 4
-                            : (cur == 4)  ? 8
-                            : (cur == 8)  ? 16
+                            : (cur == 2)  ? 3
+                            : (cur == 3)  ? 4
+                            : (cur == 4)  ? 6
+                            : (cur == 6)  ? 8
+                            : (cur == 8)  ? 12
+                            : (cur == 12) ? 16
                             :               1;
                     proc.composeSteps[(size_t) i].duration.store (next);
                 }
@@ -2173,6 +2364,75 @@ void FormaEditor::mouseDown (const juce::MouseEvent& e)
                 return;
             }
         }
+
+        // ── Selected-step panel controls ──
+        if (selectedStepIdx >= 0 && selectedStepIdx < 16)
+        {
+            auto& step = proc.composeSteps[(size_t) selectedStepIdx];
+            const int curDeg  = step.degree.load();
+            const int curDur  = step.duration.load();
+            const bool stepOff = (curDeg == 0);
+
+            // Degree chevrons.
+            if (panelDegLeftRect.contains (pos))
+            {
+                step.degree.store ((curDeg + 7) % 8);  // off..VII; wrap backward
+                repaint(); return;
+            }
+            if (panelDegRightRect.contains (pos))
+            {
+                step.degree.store ((curDeg + 1) % 8);
+                repaint(); return;
+            }
+
+            // Duration chevrons.
+            static const int durs[] = { 1, 2, 3, 4, 6, 8, 12, 16 };
+            constexpr int nDurs = (int) (sizeof (durs) / sizeof (durs[0]));
+            int durIdx = 0;
+            for (int k = 0; k < nDurs; ++k) if (durs[k] == curDur) { durIdx = k; break; }
+            if (panelDurLeftRect.contains (pos))
+            {
+                int next = durs[(durIdx - 1 + nDurs) % nDurs];
+                step.duration.store (next);
+                repaint(); return;
+            }
+            if (panelDurRightRect.contains (pos))
+            {
+                int next = durs[(durIdx + 1) % nDurs];
+                step.duration.store (next);
+                repaint(); return;
+            }
+
+            // Articulation cycle (Sustain → Stab → Pulse).
+            if (panelArticRect.contains (pos) && ! stepOff)
+            {
+                int cur = step.articulation.load();
+                step.articulation.store ((cur + 1) % 3);
+                repaint(); return;
+            }
+
+            // Rhythm cycle (None → Beats → 1and3 → Offbeats → Eighths → Sixteenths).
+            if (panelRhythmRect.contains (pos) && ! stepOff)
+            {
+                int cur = step.rhythmPattern.load();
+                step.rhythmPattern.store ((cur + 1) % 6);
+                repaint(); return;
+            }
+
+            // Click on the value rects also cycles forward (handy target).
+            if (panelDegValRect.contains (pos))
+            {
+                step.degree.store ((curDeg + 1) % 8);
+                repaint(); return;
+            }
+            if (panelDurValRect.contains (pos))
+            {
+                int next = durs[(durIdx + 1) % nDurs];
+                step.duration.store (next);
+                repaint(); return;
+            }
+        }
+
         return;
     }
 

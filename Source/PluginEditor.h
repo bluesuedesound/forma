@@ -145,6 +145,13 @@ private:
     // ── Compose step grid (replaces chord pill row in Compose mode) ──
     juce::Rectangle<int> stepRects[16];
 
+    // ── Compose selected-step panel (below the step grid) ──
+    juce::Rectangle<int> selectedPanelRect;
+    juce::Rectangle<int> panelDegLeftRect, panelDegRightRect, panelDegValRect;
+    juce::Rectangle<int> panelDurLeftRect, panelDurRightRect, panelDurValRect;
+    juce::Rectangle<int> panelArticRect;
+    juce::Rectangle<int> panelRhythmRect;
+
     // ── Capture button (visible in Sketch mode) ──
     juce::Rectangle<int> captureBtnRect;
     float captureFlashTimer = 0.0f;  // post-press feedback flash
@@ -224,9 +231,10 @@ private:
     void drawRightCol    (juce::Graphics& g);
     void drawStatusBar   (juce::Graphics& g);
     void drawChordKey    (juce::Graphics& g, juce::Rectangle<int> r, int idx);
-    void drawComposeStep (juce::Graphics& g, juce::Rectangle<int> r, int idx, int playingStep);
-    void drawStepGrid    (juce::Graphics& g);
-    void drawCaptureBtn  (juce::Graphics& g);
+    void drawComposeStep      (juce::Graphics& g, juce::Rectangle<int> r, int idx, int playingStep);
+    void drawStepGrid         (juce::Graphics& g);
+    void drawSelectedStepPanel(juce::Graphics& g);
+    void drawCaptureBtn       (juce::Graphics& g);
     void drawModeToggle  (juce::Graphics& g, int& xRight);
     void drawXYPad       (juce::Graphics& g);
     void drawAdvanced    (juce::Graphics& g);

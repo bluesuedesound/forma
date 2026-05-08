@@ -172,9 +172,11 @@ void FormaProcessor::getStateInformation (juce::MemoryBlock& destData)
         for (int i = 0; i < kComposeSteps; ++i)
         {
             auto* s = steps->createNewChildElement ("Step");
-            s->setAttribute ("i", i);
-            s->setAttribute ("d", composeSteps[(size_t) i].degree.load());
+            s->setAttribute ("i",   i);
+            s->setAttribute ("d",   composeSteps[(size_t) i].degree.load());
             s->setAttribute ("dur", composeSteps[(size_t) i].duration.load());
+            s->setAttribute ("art", composeSteps[(size_t) i].articulation.load());
+            s->setAttribute ("rhy", composeSteps[(size_t) i].rhythmPattern.load());
         }
     }
 
@@ -261,7 +263,13 @@ void FormaProcessor::setStateInformation (const void* data, int sizeInBytes)
     snapshotChordOct.store (juce::jlimit (-2, 2, xml->getIntAttribute ("snapshotChordOct", 0)));
     snapshotMoodIdx.store  (juce::jlimit (0, 11, xml->getIntAttribute ("snapshotMoodIdx", 0)));
     // Reset all steps to off, then load any saved values.
-    for (auto& s : composeSteps) { s.degree.store (0); s.duration.store (4); }
+    for (auto& s : composeSteps)
+    {
+        s.degree.store (0);
+        s.duration.store (4);
+        s.articulation.store (0);
+        s.rhythmPattern.store (0);
+    }
     if (auto* steps = xml->getChildByName ("ComposeSteps"))
     {
         for (auto* s : steps->getChildWithTagNameIterator ("Step"))
@@ -270,13 +278,15 @@ void FormaProcessor::setStateInformation (const void* data, int sizeInBytes)
             if (i < 0 || i >= kComposeSteps) continue;
             composeSteps[(size_t) i].degree.store   (juce::jlimit (0, 7, s->getIntAttribute ("d", 0)));
             int dur = s->getIntAttribute ("dur", 4);
-            // Snap to valid duration set.
-            int validDurs[] = { 1, 2, 4, 8, 16 };
+            // Snap to expanded valid duration set.
+            int validDurs[] = { 1, 2, 3, 4, 6, 8, 12, 16 };
             int snap = 4;
             int bestGap = 99999;
             for (int v : validDurs)
             { int g = std::abs (v - dur); if (g < bestGap) { bestGap = g; snap = v; } }
             composeSteps[(size_t) i].duration.store (snap);
+            composeSteps[(size_t) i].articulation.store  (juce::jlimit (0, 2, s->getIntAttribute ("art", 0)));
+            composeSteps[(size_t) i].rhythmPattern.store (juce::jlimit (0, 5, s->getIntAttribute ("rhy", 0)));
         }
     }
 
@@ -650,7 +660,8 @@ void FormaProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         {
             // Transport stopped or scrubbed away — release any held chord.
             releaseComposeChord (output, 0);
-            composeCurrentStep   = -1;
+            composeCurrentStep      = -1;
+            composeCurrentEventIdx  = -1;
             composeDisplayStep.store (-1);
         }
     }
@@ -658,7 +669,8 @@ void FormaProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     {
         // Mode switched away from Compose with a chord still held — release.
         releaseComposeChord (output, 0);
-        composeCurrentStep = -1;
+        composeCurrentStep     = -1;
+        composeCurrentEventIdx = -1;
         composeDisplayStep.store (-1);
     }
 
@@ -1320,6 +1332,58 @@ void FormaProcessor::releaseComposeChord (juce::MidiBuffer& out, int samplePosit
     composeActiveDegree = -1;
 }
 
+// Build the list of fire-event start times (step-relative beats) for the
+// given step config. Articulation 'Pulse' with no rhythm pattern is
+// treated as 'Beats' since per-spec Pulse retriggers each beat.
+static std::vector<double> makeComposeEventTimes (int stepDur, int rhythm, int artic)
+{
+    std::vector<double> events;
+    if (stepDur < 1) stepDur = 1;
+
+    int effRhythm = rhythm;
+    if (effRhythm == 0 && artic == 2) effRhythm = 1;  // None+Pulse → Beats
+
+    auto pushIfInside = [&] (double t) {
+        if (t >= 0.0 && t < (double) stepDur) events.push_back (t);
+    };
+
+    switch (effRhythm)
+    {
+        case 0:  // None — single hit at step start
+            events.push_back (0.0);
+            break;
+        case 1:  // Beats — every beat
+            for (int b = 0; b < stepDur; ++b) pushIfInside ((double) b);
+            break;
+        case 2:  // 1 and 3 — beats 1 and 3, repeated every 4 beats
+            if (stepDur >= 3)
+            {
+                for (int b = 0; b < stepDur; b += 4)
+                {
+                    pushIfInside ((double) b);
+                    pushIfInside ((double) b + 2.0);
+                }
+            }
+            else
+            {
+                events.push_back (0.0);  // fallback for short steps
+            }
+            break;
+        case 3:  // Offbeats — &-of-each-beat
+            for (int b = 0; b < stepDur; ++b) pushIfInside ((double) b + 0.5);
+            break;
+        case 4:  // Eighths — every 0.5 beat
+            for (int k = 0; k < stepDur * 2; ++k) pushIfInside ((double) k * 0.5);
+            break;
+        case 5:  // Sixteenths — every 0.25 beat
+            for (int k = 0; k < stepDur * 4; ++k) pushIfInside ((double) k * 0.25);
+            break;
+    }
+
+    if (events.empty()) events.push_back (0.0);
+    return events;
+}
+
 void FormaProcessor::updateComposePlayback (juce::MidiBuffer& out, int samplePosition,
                                              bool isPlaying, double ppq)
 {
@@ -1338,6 +1402,7 @@ void FormaProcessor::updateComposePlayback (juce::MidiBuffer& out, int samplePos
         if (composeActiveDegree >= 0)
             releaseComposeChord (out, samplePosition);
         composeCurrentStep = -1;
+        composeCurrentEventIdx = -1;
         composeDisplayStep.store (-1);
         return;
     }
@@ -1347,34 +1412,95 @@ void FormaProcessor::updateComposePlayback (juce::MidiBuffer& out, int samplePos
     if (loopBeats < 0.0) loopBeats += total;
 
     double stepStart = 0.0;
-    int newStep = composeStepAtBeat (loopBeats, stepStart);
+    const int newStep = composeStepAtBeat (loopBeats, stepStart);
     composeDisplayStep.store (newStep);
 
     if (newStep < 0) return;
 
-    const int newDegree = composeSteps[(size_t) newStep].degree.load();
-
-    // Skip only if the same step is still active AND its degree matches
-    // what we are actually voicing. If the user edited the step's degree
-    // mid-playback, the second test fails and we re-trigger.
-    if (newStep == composeCurrentStep && composeActiveDegree == newDegree)
-        return;
+    const int stepDeg = composeSteps[(size_t) newStep].degree.load();
+    int stepDur = composeSteps[(size_t) newStep].duration.load();
+    if (stepDur < 1) stepDur = 1;
+    const int artic   = composeSteps[(size_t) newStep].articulation.load();
+    const int rhythm  = composeSteps[(size_t) newStep].rhythmPattern.load();
 
     const int safeOffset = juce::jlimit (0, juce::jmax (0, currentBlockSize - 1), samplePosition);
 
-    if (composeActiveDegree >= 0)
-        releaseChord (out, safeOffset);
-
-    composeCurrentStep  = newStep;
-    composeActiveDegree = -1;
-
-    if (newDegree >= 1 && newDegree <= 7)
+    // Step boundary crossed: release any held chord and reset event state.
+    if (newStep != composeCurrentStep)
     {
-        // Use Sketch's voicer: the same triggerChord path used by chord
-        // pills and CC1. It handles voicing, drift, bass, suggestions.
-        // Velocity 90 — slightly above the editor's 80 default for clarity.
-        triggerChord (newDegree, (juce::uint8) 90, out, safeOffset);
-        composeActiveDegree = newDegree;
+        if (composeActiveDegree >= 0)
+            releaseChord (out, safeOffset);
+        composeCurrentStep      = newStep;
+        composeActiveDegree     = -1;
+        composeCurrentEventIdx  = -1;
+        composeReleaseDueBeat   = 0.0;
+    }
+
+    // Off step: nothing to fire.
+    if (stepDeg < 1 || stepDeg > 7) return;
+
+    // Build fire-event list. Cheap (<= ~64 entries even for 16-beat
+    // sixteenths) and runs once per block.
+    const auto events = makeComposeEventTimes (stepDur, rhythm, artic);
+    const double stepBeat = loopBeats - stepStart;
+
+    // Find latest event at or before the current sub-step position.
+    int evIdx = -1;
+    for (int k = 0; k < (int) events.size(); ++k)
+    {
+        if (events[(size_t) k] <= stepBeat + 1e-6) evIdx = k;
+        else break;
+    }
+
+    // Pull bpm for articulation-time conversion (Stab uses absolute ms,
+    // Pulse uses fractional gap).
+    double bpm = linkBpm.load();
+    if (bpm < 30.0) bpm = 120.0;
+    const double secsPerBeat = 60.0 / bpm;
+
+    auto eventEndStepBeat = [&] (int idx) -> double
+    {
+        const double evStart = events[(size_t) idx];
+        const double evNext  = (idx + 1 < (int) events.size())
+                                  ? events[(size_t) (idx + 1)]
+                                  : (double) stepDur;
+        const double gap = evNext - evStart;
+        if (artic == 1)  // Stab: 150ms in beats, capped to gap
+            return evStart + juce::jmin (gap, 0.150 / secsPerBeat);
+        if (artic == 2)  // Pulse: 80% of gap
+            return evStart + gap * 0.80;
+        // Sustain: hold until next event (or step end).
+        return evStart + gap;
+    };
+
+    // Detect new event firing, OR same event but degree edited mid-flight.
+    const bool newEvent = (evIdx >= 0 && evIdx != composeCurrentEventIdx);
+    const bool degMismatch = (composeActiveDegree >= 0 && composeActiveDegree != stepDeg);
+
+    if (newEvent || degMismatch)
+    {
+        if (composeActiveDegree >= 0)
+            releaseChord (out, safeOffset);
+        composeActiveDegree = -1;
+
+        if (evIdx >= 0)
+        {
+            triggerChord (stepDeg, (juce::uint8) 90, out, safeOffset);
+            composeActiveDegree    = stepDeg;
+            composeCurrentEventIdx = evIdx;
+            composeReleaseDueBeat  = eventEndStepBeat (evIdx);
+        }
+        return;
+    }
+
+    // Release timing within the current event. stepBeat advances each
+    // block; when it crosses the event-end threshold, release.
+    if (composeActiveDegree >= 0
+        && evIdx == composeCurrentEventIdx
+        && stepBeat >= composeReleaseDueBeat)
+    {
+        releaseChord (out, safeOffset);
+        composeActiveDegree = -1;
     }
 }
 
